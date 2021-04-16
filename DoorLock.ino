@@ -1,4 +1,5 @@
-#include "ptldap/LDAP_lib.hpp"
+#include "ptldap/ptldap.hpp"
+uint8_t LDAP::MsgBuilder::id = 1;
 
 #include <sstream>
 #include <ESP8266WiFi.h>
