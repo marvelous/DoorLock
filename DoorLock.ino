@@ -1,10 +1,11 @@
-#include "ptldap/LDAP_lib.hpp"
+#include <ESP8266WiFi.h>
+#include <FastLED.h>
+#include <MFRC522.h>
+#include <SPI.h>
 
 #include <sstream>
-#include <ESP8266WiFi.h>
-#include <SPI.h>
-#include <MFRC522.h>
-#include <FastLED.h>
+
+#include "ptldap/LDAP_lib.hpp"
 
 #define RST_PIN D4
 #define SS_PIN D8
@@ -25,8 +26,8 @@ const uint16_t port = LDAP_PORT;
 #include "server.h"
 
 // This file should contains the login for the LDAP
-// You can disallow anonymous access to the badge ID people can't be imperssonated
-// It should contain the following value:
+// You can disallow anonymous access to the badge ID people can't be
+// imperssonated It should contain the following value:
 /*
 const char* ldap_login = "cn=DoorLockCN,ou=DoorLockOU,dc=DoorLockDC";
 const char* ldap_passwd = "DOORLOCK_LDAP_PASSWD";
@@ -50,7 +51,7 @@ void setup() {
 
   // Init the SPI for the RFID reader
   SPI.begin();
-	mfrc522.PCD_Init();
+  mfrc522.PCD_Init();
   mfrc522.PCD_DumpVersionToSerial();
   pinMode(RELAY_PIN, OUTPUT);
 
@@ -81,16 +82,17 @@ void loop() {
   leds[0] = CRGB::Red;
   FastLED.show();
 
-  // Reset the loop if no new card present on the sensor/reader. This saves the entire process when idle.
-	if (!mfrc522.PICC_IsNewCardPresent()) {
+  // Reset the loop if no new card present on the sensor/reader. This saves the
+  // entire process when idle.
+  if (!mfrc522.PICC_IsNewCardPresent()) {
     delay(100);
-		return;
-	}
+    return;
+  }
 
-	// Read the cards, restart the loop on error
-	if (!mfrc522.PICC_ReadCardSerial()) {
-		return;
-	}
+  // Read the cards, restart the loop on error
+  if (!mfrc522.PICC_ReadCardSerial()) {
+    return;
+  }
 
   leds[0] = CRGB::Blue;
   FastLED.show();
@@ -104,8 +106,8 @@ void loop() {
       Serial.print('0');
     }
     Serial.print(mfrc522.uid.uidByte[i], HEX);
-    badgenuidss << (char) mfrc522.uid.uidByte[i];
-	}
+    badgenuidss << (char)mfrc522.uid.uidByte[i];
+  }
   Serial.println();
   badgenuidstr = badgenuidss.str();
 
@@ -129,7 +131,7 @@ void loop() {
   if (client.connected()) {
     auto req = LDAP::BindRequest(ldap_login, ldap_passwd).str();
     Serial.println("> BindRequest");
-    for(int i = 0; i < req.length(); i++) {
+    for (int i = 0; i < req.length(); i++) {
       if (req.c_str()[i] < 0x10) {
         Serial.print('0');
       }
@@ -157,7 +159,7 @@ void loop() {
   Serial.println("<BindResponse");
   while (client.available()) {
     char ch = static_cast<char>(client.read());
-    if(ch < 0x10) {
+    if (ch < 0x10) {
       Serial.print('0');
     }
     Serial.print(ch, HEX);
@@ -168,12 +170,12 @@ void loop() {
   // TODO: add a filter for ptl-active group
   Serial.println("sending data to server");
   if (client.connected()) {
-    auto req = LDAP::SearchRequest(ldap_member_group,
-                                   "badgenuid", 
-                                   badgenuidstr,
-                                   "cn").str();
+    auto req =
+        LDAP::SearchRequest(ldap_member_group, "badgenuid", badgenuidstr, "cn")
+            .str();
+
     Serial.println(">SearchRequest");
-    for(int i = 0; i < req.length(); i++) {
+    for (int i = 0; i < req.length(); i++) {
       if (req.c_str()[i] < 0x10) {
         Serial.print('0');
       }
@@ -203,7 +205,7 @@ void loop() {
   while (client.available()) {
     char ch = static_cast<char>(client.read());
     res += ch;
-    if(ch < 0x10) {
+    if (ch < 0x10) {
       Serial.print('0');
     }
     Serial.print(ch, HEX);
@@ -224,7 +226,7 @@ void loop() {
     FastLED.show();
     Serial.println("Locking back");
   } else {
-    for(int i = 0; i < 5; i++) {
+    for (int i = 0; i < 5; i++) {
       leds[0] = CRGB::Red;
       FastLED.show();
       delay(200);
