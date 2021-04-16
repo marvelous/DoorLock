@@ -1,2 +1,5 @@
 server.h
 login.h
+.editorconfig
+
+.vscode/
