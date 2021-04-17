@@ -9,6 +9,10 @@
 #include <iostream>
 #include <cstring>
 
+#include "string_view.hpp"
+using namespace nonstd::literals;
+using namespace nonstd;
+
 using namespace std;
 
 namespace BER
@@ -85,10 +89,10 @@ namespace BER
             uint8_t payload = data.data()[offset++];
 
             if ((Type)type != Type::Bool) {
-                return pair(nullptr, 0);
+                return pair<Bool*, size_t>(nullptr, 0);
             }
 
-            return pair(new Bool(!!payload), offset);
+            return pair<Bool*, size_t>(new Bool(!!payload), offset);
         }
     };
 
@@ -120,7 +124,7 @@ namespace BER
             uint8_t size = data.data()[offset++];
 
             if ((Type)type != Type::Integer && (Type)type != Type::Enum) {
-                return pair(nullptr, 0);
+                return pair<Integer*, size_t>(nullptr, 0);
             }
 
             size_t value = 0;
@@ -128,7 +132,7 @@ namespace BER
             {
                 value += data.data()[offset++] << (i*8);
             }
-            return pair(new Integer(value), offset);
+            return pair<Integer*, size_t>(new Integer(value), offset);
         }
     };
 
@@ -144,11 +148,11 @@ namespace BER
             uint8_t size = data.c_str()[offset++];
 
             if ((Type)type != Type::Enum) {
-                return pair(nullptr, 0);
+                return pair<Enum*, size_t>(nullptr, 0);
             }
 
             if (sizeof(T) < size) {
-                return pair(nullptr, 0);
+                return pair<Enum*, size_t>(nullptr, 0);
             }
 
             size_t value = 0;
@@ -156,7 +160,7 @@ namespace BER
             {
                 value += data.c_str()[offset++] << (i*8);
             }
-            return pair(new Enum<T>((T)value), offset);
+            return pair<Enum*, size_t>(new Enum<T>((T)value), offset);
         }
     };
 
@@ -182,13 +186,13 @@ namespace BER
             string payload;
 
             if ((Type)type != Type::String) {
-                return pair(nullptr, 0);
+                return pair<String*, size_t>(nullptr, 0);
             }
 
             for(size_t i = 0; i < size; i++) {
                 payload += data.data()[offset++];
             }
-            return pair(new String(payload), offset);
+            return pair<String*, size_t>(new String(payload), offset);
         }
     };
 
@@ -198,7 +202,7 @@ namespace BER
     public:
         explicit SimpleAuth(uint8_t len, const char *value) : String(len, value, Type::SimpleAuth) {}
         explicit SimpleAuth(string value) : String(std::move(value), Type::SimpleAuth) {}
-        static pair<String*, size_t> parse(string_view data)
+        static pair<SimpleAuth*, size_t> parse(string_view data)
         {
             size_t offset = 0;
             uint8_t type = data.data()[offset++];
@@ -206,13 +210,13 @@ namespace BER
             string payload;
 
             if ((Type)type != Type::SimpleAuth) {
-                return pair(nullptr, 0);
+                return pair<SimpleAuth*, size_t>(nullptr, 0);
             }
 
             for(size_t i = 0; i < size; i++) {
                 payload += data.data()[offset++];
             }
-            return pair(new String(payload), offset);
+            return pair<SimpleAuth*, size_t>(new SimpleAuth(payload), offset);
         }
     };
 
@@ -272,30 +276,30 @@ namespace BER
             switch(type) {
                 case Type::Bool: {
                     auto res = Bool::parse(data);
-                    return pair(static_cast<Element *>(res.first), res.second);
+                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 case Type::Integer: {
                     auto res = Integer::parse(data);
-                    return pair(static_cast<Element *>(res.first), res.second);
+                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 case Type::String: {
                     auto res = String::parse(data);
-                    return pair(static_cast<Element *>(res.first), res.second);
+                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 case Type::Enum: {
                     auto res = Integer::parse(data);
-                    return pair(static_cast<Element *>(res.first), res.second);
+                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 case Type::Attribute: {
                     auto res = String::parse(data);
-                    return pair(static_cast<Element *>(res.first), res.second);
+                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 case Type::SimpleAuth: {
                     auto res = SimpleAuth::parse(data);
-                    return pair(static_cast<Element *>(res.first), res.second);
+                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 default:
-                    return pair(nullptr, 0);
+                    return pair<Element*, size_t>(nullptr, 0);
             }
         }
     };
@@ -449,7 +453,7 @@ namespace LDAP
                 op->addElement(res.first);
                 offset += res.second;
             }
-            return pair(op, 0);
+            return pair<Op*, size_t>(op, 0);
         }
     };
 
