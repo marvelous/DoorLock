@@ -1,34 +1,120 @@
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #define BIND_RESPONSE "\x30\x0c\x02\x01\x01\x61\x07\x0a\x01\x00\x04\x00\x04\x00"
 
-// 30 packet ldap
-// 0c size du message
-// {
+enum ldap_id {
+  // Base types
+  Bool = 0x01,
+  Integer = 0x02,
+  String = 0x04,
+  Enum = 0x0a,
 
-//  message content
-// 02 (int)
-// 01 taille
-// {
-// 01 valeur
-// },
+  Attribute = 0x30,
 
-// 61 (type) [bind response]
-// 07 (taille)
-{
-  // 0a (type) [enum]
-  // 01 (taille)
-  // 00 (valeur) [=success]
+  // Op(erations)
+  BindRequest = 0x60,
+  BindResponse,
+  UnbindRequest,
+  SearchRequest,
+  SearchResultEntry,
+  SearchResultDone,
+  SearchResultReference,
+  ModifyRequest,
+  ModifyResponse,
+  AddRequest,
+  AddResponse,
+  DelRequest,
+  DelResponse,
+  ModifyDNRequest,
+  ModifyDNResponse,
+  CompareRequest,
+  CompareResponse,
+  AbandonRequest,
+  ExtendedRequest,
+  ExtendedResponse,
 
-  // 04 (type: string) [  matchedDN     LDAPDN,]
-  // 00 (taille)
+  // Authentications
+  SimpleAuth = 0x80,
+  SASL,
 
-  // 04 (type: string) [errorMessage  ErrorMessage]
-  // 00 (taille)
+  // Filters
+  And = 0xA0,
+  Or,
+  Not,
+  EqualityMatch,
+  Substrings,
+  GreaterOrEqual,
+  LessOrEqual,
+  Present,
+  ApproxMatch,
+  ExtensibleMatch,
+};
+
+typedef struct action {
+  char *name;
+  uint8_t id;
+  char *(*parse_func)(element_t *, char *);
+} action_t;
+
+typedef struct element {
+  uint8_t id;
+  uint8_t size_byte;
+  uint8_t *value;
+  struct element *el;
+} element_t;
+
+void element_print(const element_t *el) {
+  printf("\nEL \t| id: %02x \t| size: %02x", el->id, el->size_byte);
 }
+
+char *parse_element(element_t *el, const char *offset) {
+  el->id = (uint8_t)*offset;
+  el->size_byte = (uint8_t)*offset + 1;
+  return el->size_byte + offset;
 }
+
+element_t *parser_BindResponse(char *element_msg) {}
 
 int main() {
-  printf("%x", 0xf2);
+  char *received_msg = BIND_RESPONSE;
+  // puts("\n");
+  // for (uint8_t i = 0; i < 14; i++) {
+  //   printf("%02x ", received_msg[i]);
+  // }
+
+  puts("\n\nMalloc");
+
+  char *offset = received_msg;
+  element_t *head = 0;
+  element_t *tail = 0;
+  element_t *prev = 0;
+
+  for (uint8_t i = 0; i < 14; i++) {
+    tail = malloc(sizeof(element_t));
+    if (i == 0) {
+      head = tail;
+      prev = tail;
+    }
+    prev->el = tail;
+
+    offset = parse_element(tail, offset);
+
+    printf("%02x ", received_msg[i]);
+  }
+  tail->el = 0;
+
+  puts("\n\nFree");
+
+  element_t *current = head;
+
+  while (current) {
+    prev = current;
+    element_print(current);
+    current = current->el;
+    free(prev);
+  }
+
   return 0;
 }
 
