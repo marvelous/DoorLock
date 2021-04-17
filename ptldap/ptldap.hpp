@@ -447,7 +447,7 @@ namespace LDAP
             uint8_t size = data.data()[offset++];
 
             auto op = new Op(type);
-            while (offset < data.size()) {
+            while (offset < size + offset) {
                 auto element_str = data.substr(offset);
                 auto res = BER::ElementBuilder::parse(element_str);
                 op->addElement(res.first);
