@@ -64,9 +64,10 @@ namespace BER
 
     class Bool : public Element
     {
+        Bool() : Element(Type::Bool), value(false) {}
+    public:
         bool value;
 
-    public:
         explicit Bool(bool value) : Element(Type::Bool), value(value) {}
         ostringstream &append(ostringstream &oss) final
         {
@@ -75,13 +76,26 @@ namespace BER
             oss << (char)this->value;
             return oss;
         }
+        static Bool* parse(string data)
+        {
+            size_t offset = 0;
+            uint8_t type = data.c_str()[offset++];
+            uint8_t size = data.c_str()[offset++];
+            uint8_t payload = data.c_str()[offset++];
+
+            if ((Type)type != Type::Bool) {
+                return nullptr;
+            }
+
+            return new Bool(!!payload);
+        }
     };
 
     template <typename T>
     class Integer : public Element
     {
-        T value;
     public:
+        T value;
         explicit Integer(T value, Type type = Type::Integer) : Element(type), value(value) {}
         ostringstream &append(ostringstream &oss) final
         {
@@ -93,20 +107,61 @@ namespace BER
             }
             return oss;
         }
+        static Integer* parse(string data)
+        {
+            size_t offset = 0;
+            uint8_t type = data.c_str()[offset++];
+            uint8_t size = data.c_str()[offset++];
+
+            if ((Type)type != Type::Integer) {
+                return nullptr;
+            }
+
+            if (sizeof(T) < size) {
+                return nullptr;
+            }
+
+            size_t value = 0;
+            for (size_t i = 0; i < sizeof(T); i++)
+            {
+                value += data.c_str()[offset++] << (i*8);
+            }
+            return new Integer<T>((T)value);
+        }
     };
+
     template <typename T>
     class Enum : public Integer<T>
     {
     public:
         explicit Enum(T value) : Integer<T>(value, Type::Enum) {}
+        static Enum* parse(string data)
+        {
+            size_t offset = 0;
+            uint8_t type = data.c_str()[offset++];
+            uint8_t size = data.c_str()[offset++];
+
+            if ((Type)type != Type::Enum) {
+                return nullptr;
+            }
+
+            if (sizeof(T) < size) {
+                return nullptr;
+            }
+
+            size_t value = 0;
+            for (size_t i = 0; i < sizeof(T); i++)
+            {
+                value += data.c_str()[offset++] << (i*8);
+            }
+            return new Enum<T>((T)value);
+        }
     };
 
     class String : public Element
     {
-    protected:
-        string value;
-
     public:
+        string value;
         explicit String(uint8_t len, const char *value, Type type = Type::String) : Element(type),
                                                                                     value(string(value, len)) {}
         explicit String(string value, Type type = Type::String) : Element(type), value(std::move(value)) {}
@@ -116,6 +171,22 @@ namespace BER
             oss << (char)value.length();
             oss << this->value;
             return oss;
+        }
+        static String* parse(string data)
+        {
+            size_t offset = 0;
+            uint8_t type = data.c_str()[offset++];
+            uint8_t size = data.c_str()[offset++];
+            string payload;
+
+            if ((Type)type != Type::Enum) {
+                return nullptr;
+            }
+
+            for(size_t i = offset; offset < data.size(); i++) {
+                payload += data.c_str()[i];
+            }
+            return new String(payload);
         }
     };
 
@@ -329,7 +400,9 @@ namespace LDAP
             ostringstream oss;
             oss << Header;
             oss << msgSize;
+
             oss << _id;
+
             oss << _op;
             return oss.str();
         }
@@ -433,5 +506,10 @@ namespace LDAP
                 .addElement(&this->filter)
                 .addElement(&this->attribute);
         }
+
+//        static SearchRequest parse(string msg) {
+//            size_t offset = 0;
+//
+//        }
     };
 }
