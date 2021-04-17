@@ -48,6 +48,7 @@ namespace BER
         DnAttributes,
     };
 
+
     class Element
     {
     public:
@@ -76,77 +77,78 @@ namespace BER
             oss << (char)this->value;
             return oss;
         }
-        static Bool* parse(string data)
+        static pair<Bool*, size_t> parse(string_view data)
         {
             size_t offset = 0;
-            uint8_t type = data.c_str()[offset++];
-            uint8_t size = data.c_str()[offset++];
-            uint8_t payload = data.c_str()[offset++];
+            uint8_t type = data.data()[offset++];
+            uint8_t size = data.data()[offset++];
+            uint8_t payload = data.data()[offset++];
 
             if ((Type)type != Type::Bool) {
-                return nullptr;
+                return pair(nullptr, 0);
             }
 
-            return new Bool(!!payload);
+            return pair(new Bool(!!payload), offset);
         }
     };
 
-    template <typename T>
     class Integer : public Element
     {
     public:
-        T value;
-        explicit Integer(T value, Type type = Type::Integer) : Element(type), value(value) {}
+        uint32_t value;
+        explicit Integer(uint32_t value, Type type = Type::Integer) : Element(type), value(value) {}
         ostringstream &append(ostringstream &oss) final
         {
+            uint8_t size = 1;
+            if (value != 0) {
+                size = (int)log2(value - 1) / 8 + 1;
+            }
+
             oss << (char)this->type;
-            oss << (char)sizeof(T);
-            // TODO: do something less stupid
-            for(size_t i = 0; i < sizeof(T); i++) {
-                oss << (char)((uint8_t*)&this->value)[i];
+            oss << (char)size;
+            for(size_t i = 0; i < size; i++) {
+                auto shift = ((size-1-i)*8);
+                uint8_t byte = (value >> shift) & 0xff;
+                oss << (uint8_t)byte;
             }
             return oss;
         }
-        static Integer* parse(string data)
+        static pair<Integer*, size_t> parse(string_view data)
         {
             size_t offset = 0;
-            uint8_t type = data.c_str()[offset++];
-            uint8_t size = data.c_str()[offset++];
+            uint8_t type = data.data()[offset++];
+            uint8_t size = data.data()[offset++];
 
-            if ((Type)type != Type::Integer) {
-                return nullptr;
-            }
-
-            if (sizeof(T) < size) {
-                return nullptr;
+            if ((Type)type != Type::Integer && (Type)type != Type::Enum) {
+                return pair(nullptr, 0);
             }
 
             size_t value = 0;
-            for (size_t i = 0; i < sizeof(T); i++)
+            for (size_t i = 0; i < size; i++)
             {
-                value += data.c_str()[offset++] << (i*8);
+                value += data.data()[offset++] << (i*8);
             }
-            return new Integer<T>((T)value);
+            return pair(new Integer(value), offset);
         }
     };
 
     template <typename T>
-    class Enum : public Integer<T>
+    class Enum : public Integer
     {
     public:
-        explicit Enum(T value) : Integer<T>(value, Type::Enum) {}
-        static Enum* parse(string data)
+        explicit Enum(T value) : Integer(static_cast<uint32_t>(value), Type::Enum) {}
+        static pair<Enum*, size_t> parse(string data)
         {
             size_t offset = 0;
             uint8_t type = data.c_str()[offset++];
             uint8_t size = data.c_str()[offset++];
 
             if ((Type)type != Type::Enum) {
-                return nullptr;
+                return pair(nullptr, 0);
             }
 
             if (sizeof(T) < size) {
-                return nullptr;
+                return pair(nullptr, 0);
             }
 
             size_t value = 0;
@@ -154,7 +156,7 @@ namespace BER
             {
                 value += data.c_str()[offset++] << (i*8);
             }
-            return new Enum<T>((T)value);
+            return pair(new Enum<T>((T)value), offset);
         }
     };
 
@@ -172,21 +174,21 @@ namespace BER
             oss << this->value;
             return oss;
         }
-        static String* parse(string data)
+        static pair<String*, size_t> parse(string_view data)
         {
             size_t offset = 0;
-            uint8_t type = data.c_str()[offset++];
-            uint8_t size = data.c_str()[offset++];
+            uint8_t type = data.data()[offset++];
+            uint8_t size = data.data()[offset++];
             string payload;
 
-            if ((Type)type != Type::Enum) {
-                return nullptr;
+            if ((Type)type != Type::String) {
+                return pair(nullptr, 0);
             }
 
-            for(size_t i = offset; offset < data.size(); i++) {
-                payload += data.c_str()[i];
+            for(size_t i = 0; i < size; i++) {
+                payload += data.data()[offset++];
             }
-            return new String(payload);
+            return pair(new String(payload), offset);
         }
     };
 
@@ -196,6 +198,22 @@ namespace BER
     public:
         explicit SimpleAuth(uint8_t len, const char *value) : String(len, value, Type::SimpleAuth) {}
         explicit SimpleAuth(string value) : String(std::move(value), Type::SimpleAuth) {}
+        static pair<String*, size_t> parse(string_view data)
+        {
+            size_t offset = 0;
+            uint8_t type = data.data()[offset++];
+            uint8_t size = data.data()[offset++];
+            string payload;
+
+            if ((Type)type != Type::SimpleAuth) {
+                return pair(nullptr, 0);
+            }
+
+            for(size_t i = 0; i < size; i++) {
+                payload += data.data()[offset++];
+            }
+            return pair(new String(payload), offset);
+        }
     };
 
     // This implementation is inexact, only support simple extensibleMatch
@@ -242,6 +260,43 @@ namespace BER
             oss << (char)attribute.str().length();
             oss << attribute.str();
             return oss;
+        }
+    };
+
+    class ElementBuilder
+    {
+    public:
+        ElementBuilder() = default;
+        static pair<Element*, size_t> parse(string_view data) {
+            Type type = static_cast<Type>(data[0]);
+            switch(type) {
+                case Type::Bool: {
+                    auto res = Bool::parse(data);
+                    return pair(static_cast<Element *>(res.first), res.second);
+                }
+                case Type::Integer: {
+                    auto res = Integer::parse(data);
+                    return pair(static_cast<Element *>(res.first), res.second);
+                }
+                case Type::String: {
+                    auto res = String::parse(data);
+                    return pair(static_cast<Element *>(res.first), res.second);
+                }
+                case Type::Enum: {
+                    auto res = Integer::parse(data);
+                    return pair(static_cast<Element *>(res.first), res.second);
+                }
+                case Type::Attribute: {
+                    auto res = String::parse(data);
+                    return pair(static_cast<Element *>(res.first), res.second);
+                }
+                case Type::SimpleAuth: {
+                    auto res = SimpleAuth::parse(data);
+                    return pair(static_cast<Element *>(res.first), res.second);
+                }
+                default:
+                    return pair(nullptr, 0);
+            }
         }
     };
 }
@@ -360,11 +415,11 @@ namespace LDAP
     {
     private:
         Protocol::Type type;
-        vector<BER::Element *> elements;
+        vector<BER::Element*> elements;
 
     public:
         explicit Op(Protocol::Type type) : type(type) {}
-        Op &addElement(BER::Element *element)
+        Op &addElement(BER::Element* element)
         {
             elements.push_back(element);
             return *this;
@@ -372,7 +427,7 @@ namespace LDAP
         string str()
         {
             ostringstream inside;
-            for (auto element : this->elements)
+            for (auto& element : this->elements)
             {
                 element->append(inside);
             }
@@ -381,6 +436,20 @@ namespace LDAP
             oss << (char)inside.str().length();
             oss << inside.str();
             return oss.str();
+        }
+        static pair<Op*, size_t> parse(string_view data) {
+            size_t offset = 0;
+            Protocol::Type type = static_cast<Protocol::Type>(data.data()[offset++]);
+            uint8_t size = data.data()[offset++];
+
+            auto op = new Op(type);
+            while (offset < data.size()) {
+                auto element_str = data.substr(offset);
+                auto res = BER::ElementBuilder::parse(element_str);
+                op->addElement(res.first);
+                offset += res.second;
+            }
+            return pair(op, 0);
         }
     };
 
@@ -393,7 +462,7 @@ namespace LDAP
         Msg(uint8_t id, Op *op) : id(id), op(op) {}
         string str()
         {
-            auto _id = BER::Integer<uint8_t>(this->id).str();
+            auto _id = BER::Integer(this->id).str();
             auto _op = this->op->str();
             uint8_t msgSize = _id.length() + _op.length();
 
@@ -435,10 +504,10 @@ namespace LDAP
 
     class BindRequest : public BaseMsg
     {
-        BER::Integer<uint8_t> version = BER::Integer<uint8_t>(0x03);
-        BER::String name;
-        BER::String password;
     public:
+        BER::Integer version = BER::Integer(0x03);
+        BER::String name;
+        BER::SimpleAuth password;
         BindRequest(string name, string password)
         : BaseMsg(Protocol::Type::BindRequest),
           name(BER::String(std::move(name))),
@@ -447,6 +516,33 @@ namespace LDAP
             this->op.addElement(&this->version) // Supported LDAP version
                 .addElement(&this->name)
                 .addElement(&this->password);
+        }
+        BindRequest(BER::String* name, BER::SimpleAuth* password)
+                : BaseMsg(Protocol::Type::BindRequest),
+                  name(std::move(*name)),
+                  password(std::move(*password))
+        {
+            this->op.addElement(&this->version) // Supported LDAP version
+                    .addElement(&this->name)
+                    .addElement(&this->password);
+        }
+        static BindRequest* parse(string data) {
+            size_t offset = 0;
+
+            auto ber_version = BER::ElementBuilder::parse(data.substr(offset));
+            auto version = static_cast<BER::Integer*>(ber_version.first);
+            offset += ber_version.second;
+
+            auto ber_name = BER::ElementBuilder::parse(data.substr(offset));
+            auto name = static_cast<BER::String*>(ber_name.first);
+            offset += ber_name.second;
+
+            auto ber_password = BER::ElementBuilder::parse(data.substr(offset));
+            auto password = static_cast<BER::SimpleAuth*>(ber_password.first);
+            offset += ber_password.second;
+
+            auto bindRequest = new BindRequest(name, password);
+            return bindRequest;
         }
     };
 
@@ -474,8 +570,8 @@ namespace LDAP
         BER::String baseObject;
         BER::Enum<Protocol::SearchRequest::Scope> scope;
         BER::Enum<Protocol::SearchRequest::DerefAliases> derefAliases;
-        BER::Integer<uint8_t> sizeLimit;
-        BER::Integer<uint8_t> timeLimit;
+        BER::Integer sizeLimit;
+        BER::Integer timeLimit;
         BER::Bool typesOnly;
         BER::Filter filter;
         BER::Attribute attribute;
@@ -491,13 +587,14 @@ namespace LDAP
           baseObject(BER::String(std::move(baseObject))),
           scope(BER::Enum<Protocol::SearchRequest::Scope>(scope)),
           derefAliases(BER::Enum<Protocol::SearchRequest::DerefAliases>(derefAliases)),
-          sizeLimit(BER::Integer<uint8_t>(0)),
-          timeLimit(BER::Integer<uint8_t>(0)),
+          sizeLimit(BER::Integer(0)),
+          timeLimit(BER::Integer(0)),
           typesOnly(BER::Bool(typesOnly)),
           filter(BER::Filter(std::move(filterType), std::move(filterValue))),
           attribute(BER::Attribute(std::move(attribute)))
         {
-            this->op.addElement(&this->baseObject)
+            this->op
+                .addElement(&this->baseObject)
                 .addElement(&this->scope)
                 .addElement(&this->derefAliases)
                 .addElement(&this->sizeLimit)
