@@ -1,27 +1,31 @@
 #include <stdio.h>
-#define BIND_RESPONSE 0
-// header -------------
+#define BIND_RESPONSE "\x30\x0c\x02\x01\x01\x61\x07\x0a\x01\x00\x04\x00\x04\x00"
+
 // 30 packet ldap
 // 0c size du message
+// {
 
 //  message content
 // 02 (int)
 // 01 taille
+// {
 // 01 valeur
+// },
 
-// data -------------
 // 61 (type) [bind response]
 // 07 (taille)
+{
+  // 0a (type) [enum]
+  // 01 (taille)
+  // 00 (valeur) [=success]
 
-// 0a (type) [enum]
-// 01 (taille)
-// 00 (valeur) [=success]
+  // 04 (type: string) [  matchedDN     LDAPDN,]
+  // 00 (taille)
 
-// 04 (type: string) [  matchedDN     LDAPDN,]
-// 00 (taille)
-
-// 04 (type: string) [errorMessage  ErrorMessage]
-// 00 (taille)
+  // 04 (type: string) [errorMessage  ErrorMessage]
+  // 00 (taille)
+}
+}
 
 int main() {
   printf("%x", 0xf2);

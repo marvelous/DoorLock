@@ -1,0 +1,3 @@
+/home/pliski/dev/ptl/DoorLock/ptldap/tests/cmake-build/CMakeFiles/rebuild_cache.dir
+/home/pliski/dev/ptl/DoorLock/ptldap/tests/cmake-build/CMakeFiles/edit_cache.dir
+/home/pliski/dev/ptl/DoorLock/ptldap/tests/cmake-build/CMakeFiles/ptldap_tests.dir
