@@ -15,8 +15,20 @@ using namespace nonstd;
 
 using namespace std;
 
+template<typename TO, typename FROM>
+static unique_ptr<TO> static_unique_pointer_cast (unique_ptr<FROM>&& old){
+    // conversion: unique_ptr<FROM>->FROM*->TO*->unique_ptr<TO>
+    return unique_ptr<TO>{static_cast<TO*>(old.release())};
+}
+
 namespace BER
 {
+    template <typename T>
+    struct ParseResult {
+        unique_ptr<T> value;
+        size_t length;
+    };
+
     enum class Type : uint8_t
     {
         // Base types
@@ -65,6 +77,12 @@ namespace BER
             return oss.str();
         }
         virtual ostringstream &append(ostringstream &oss) = 0;
+        template <typename T>
+        static unique_ptr<T> as(unique_ptr<Element> element) {
+            return static_unique_pointer_cast<T>(move(element));
+        }
+        template <typename T>
+        static ParseResult<T> parse(string_view data) {};
     };
 
     class Bool : public Element
@@ -81,18 +99,19 @@ namespace BER
             oss << (char)this->value;
             return oss;
         }
-        static pair<Bool*, size_t> parse(string_view data)
+        template <typename T=Bool>
+        static ParseResult<T> parse(string_view data)
         {
             size_t offset = 0;
-            uint8_t type = data.data()[offset++];
-            uint8_t size = data.data()[offset++];
-            uint8_t payload = data.data()[offset++];
+            uint8_t type = data[offset++];
+            uint8_t size = data[offset++];
+            uint8_t payload = data[offset++];
 
             if ((Type)type != Type::Bool) {
-                return pair<Bool*, size_t>(nullptr, 0);
+                return ParseResult<T> {nullptr, 0};
             }
 
-            return pair<Bool*, size_t>(new Bool(!!payload), offset);
+            return ParseResult<T> {make_unique<Bool>(!!payload), offset };
         }
     };
 
@@ -117,14 +136,15 @@ namespace BER
             }
             return oss;
         }
-        static pair<Integer*, size_t> parse(string_view data)
+        template <typename T=Integer>
+        static ParseResult<T> parse(string_view data)
         {
             size_t offset = 0;
             uint8_t type = data.data()[offset++];
             uint8_t size = data.data()[offset++];
 
             if ((Type)type != Type::Integer && (Type)type != Type::Enum) {
-                return pair<Integer*, size_t>(nullptr, 0);
+                return ParseResult<T> {nullptr, 0};
             }
 
             size_t value = 0;
@@ -132,35 +152,37 @@ namespace BER
             {
                 value += data.data()[offset++] << (i*8);
             }
-            return pair<Integer*, size_t>(new Integer(value), offset);
+            return ParseResult<T> {std::make_unique<Integer>(value), offset};
         }
     };
 
-    template <typename T>
+    template <typename E>
     class Enum : public Integer
     {
     public:
-        explicit Enum(T value) : Integer(static_cast<uint32_t>(value), Type::Enum) {}
-        static pair<Enum*, size_t> parse(string data)
+        explicit Enum(E value) : Integer(static_cast<uint32_t>(value), Type::Enum) {}
+
+        template <typename T=Enum<E>>
+        static ParseResult<T> parse(string data)
         {
             size_t offset = 0;
-            uint8_t type = data.c_str()[offset++];
-            uint8_t size = data.c_str()[offset++];
+            uint8_t type = data[offset++];
+            uint8_t size = data[offset++];
 
             if ((Type)type != Type::Enum) {
-                return pair<Enum*, size_t>(nullptr, 0);
+                return ParseResult<T> {nullptr, 0};
             }
 
-            if (sizeof(T) < size) {
-                return pair<Enum*, size_t>(nullptr, 0);
+            if (sizeof(E) < size) {
+                return ParseResult<T> {nullptr, 0};
             }
 
             size_t value = 0;
-            for (size_t i = 0; i < sizeof(T); i++)
+            for (size_t i = 0; i < size; i++)
             {
-                value += data.c_str()[offset++] << (i*8);
+                value += data[offset++] << (i*8);
             }
-            return pair<Enum*, size_t>(new Enum<T>((T)value), offset);
+            return ParseResult<T> {make_unique<T>((E)value), offset};
         }
     };
 
@@ -178,21 +200,22 @@ namespace BER
             oss << this->value;
             return oss;
         }
-        static pair<String*, size_t> parse(string_view data)
+        template <typename T=String>
+        static ParseResult<T> parse(string_view data)
         {
             size_t offset = 0;
-            uint8_t type = data.data()[offset++];
-            uint8_t size = data.data()[offset++];
+            uint8_t type = data[offset++];
+            uint8_t size = data[offset++];
             string payload;
 
             if ((Type)type != Type::String) {
-                return pair<String*, size_t>(nullptr, 0);
+                return ParseResult<T> {nullptr, 0};
             }
 
             for(size_t i = 0; i < size; i++) {
-                payload += data.data()[offset++];
+                payload += data[offset++];
             }
-            return pair<String*, size_t>(new String(payload), offset);
+            return ParseResult<T> {make_unique<T>(payload), offset};
         }
     };
 
@@ -202,21 +225,23 @@ namespace BER
     public:
         explicit SimpleAuth(uint8_t len, const char *value) : String(len, value, Type::SimpleAuth) {}
         explicit SimpleAuth(string value) : String(std::move(value), Type::SimpleAuth) {}
-        static pair<SimpleAuth*, size_t> parse(string_view data)
+
+        template <typename T>
+        static ParseResult<T> parse(string_view data)
         {
             size_t offset = 0;
-            uint8_t type = data.data()[offset++];
-            uint8_t size = data.data()[offset++];
+            uint8_t type = data[offset++];
+            uint8_t size = data[offset++];
             string payload;
 
             if ((Type)type != Type::SimpleAuth) {
-                return pair<SimpleAuth*, size_t>(nullptr, 0);
+                return ParseResult<T> {nullptr, 0};
             }
 
             for(size_t i = 0; i < size; i++) {
-                payload += data.data()[offset++];
+                payload += data[offset++];
             }
-            return pair<SimpleAuth*, size_t>(new SimpleAuth(payload), offset);
+            return ParseResult<T> {make_unique<T>(payload), offset};
         }
     };
 
@@ -271,35 +296,40 @@ namespace BER
     {
     public:
         ElementBuilder() = default;
-        static pair<Element*, size_t> parse(string_view data) {
+        template <typename T=Element>
+        static ParseResult<T> parse(string_view data) {
             Type type = static_cast<Type>(data[0]);
             switch(type) {
                 case Type::Bool: {
-                    auto res = Bool::parse(data);
-                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
+                    return Bool::parse<T>(data);
                 }
                 case Type::Integer: {
-                    auto res = Integer::parse(data);
-                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
+                    return Integer::parse<T>(data);
+//                    auto res = Integer::parse(data);
+//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 case Type::String: {
-                    auto res = String::parse(data);
-                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
+                    return String::parse<T>(data);
+//                    auto res = String::parse(data);
+//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 case Type::Enum: {
-                    auto res = Integer::parse(data);
-                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
+                    return Integer::parse<T>(data);
+//                    auto res = Integer::parse(data);
+//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 case Type::Attribute: {
-                    auto res = String::parse(data);
-                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
+                    return String::parse<T>(data);
+//                    auto res = String::parse(data);
+//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 case Type::SimpleAuth: {
-                    auto res = SimpleAuth::parse(data);
-                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
+                    return SimpleAuth::parse<T>(data);
+//                    auto res = SimpleAuth::parse(data);
+//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
                 }
                 default:
-                    return pair<Element*, size_t>(nullptr, 0);
+                    return ParseResult<T> {nullptr, 0};
             }
         }
     };
@@ -419,13 +449,13 @@ namespace LDAP
     {
     private:
         Protocol::Type type;
-        vector<BER::Element*> elements;
+        vector<unique_ptr<BER::Element>> elements;
 
     public:
         explicit Op(Protocol::Type type) : type(type) {}
-        Op &addElement(BER::Element* element)
+        Op &addElement(unique_ptr<BER::Element> element)
         {
-            elements.push_back(element);
+            elements.push_back(move(element));
             return *this;
         }
         string str()
@@ -441,19 +471,20 @@ namespace LDAP
             oss << inside.str();
             return oss.str();
         }
-        static pair<Op*, size_t> parse(string_view data) {
+        template <typename T=Op>
+        static BER::ParseResult<Op> parse(string_view data) {
             size_t offset = 0;
-            Protocol::Type type = static_cast<Protocol::Type>(data.data()[offset++]);
-            uint8_t size = data.data()[offset++];
+            auto type = static_cast<Protocol::Type>(data[offset++]);
+            uint8_t size = data[offset++];
 
             auto op = new Op(type);
             while (offset < size + offset) {
                 auto element_str = data.substr(offset);
                 auto res = BER::ElementBuilder::parse(element_str);
-                op->addElement(res.first);
-                offset += res.second;
+                op->addElement(move(res.value));
+                offset += res.length;
             }
-            return pair<Op*, size_t>(op, 0);
+            return BER::ParseResult<Op> {make_unique<Op>(op), offset};
         }
     };
 
@@ -517,36 +548,35 @@ namespace LDAP
           name(BER::String(std::move(name))),
           password(BER::SimpleAuth(std::move(password)))
         {
-            this->op.addElement(&this->version) // Supported LDAP version
-                .addElement(&this->name)
-                .addElement(&this->password);
+            this->op.addElement(make_unique<BER::Integer>(this->version)) // Supported LDAP version
+                .addElement(make_unique<BER::String>(this->name))
+                .addElement(make_unique<BER::SimpleAuth>(this->password));
         }
-        BindRequest(BER::String* name, BER::SimpleAuth* password)
-                : BaseMsg(Protocol::Type::BindRequest),
-                  name(std::move(*name)),
-                  password(std::move(*password))
+        BindRequest(unique_ptr<BER::String> name, unique_ptr<BER::SimpleAuth> password)
+        : BaseMsg(Protocol::Type::BindRequest),
+          name(std::move(*name)),
+          password(std::move(*password))
         {
-            this->op.addElement(&this->version) // Supported LDAP version
-                    .addElement(&this->name)
-                    .addElement(&this->password);
+            this->op.addElement(make_unique<BER::Integer>(this->version)) // Supported LDAP version
+                    .addElement(make_unique<BER::String>(this->name))
+                    .addElement(make_unique<BER::SimpleAuth>(this->password));
         }
-        static BindRequest* parse(string data) {
+        static BER::ParseResult<BindRequest> parse(string data) {
             size_t offset = 0;
 
-            auto ber_version = BER::ElementBuilder::parse(data.substr(offset));
-            auto version = static_cast<BER::Integer*>(ber_version.first);
-            offset += ber_version.second;
+            // Only used to validate offset
+            auto version_parsed = BER::ElementBuilder::parse<BER::Integer>(data.substr(offset));
+            auto ber_version = move(version_parsed.value);
+            offset += version_parsed.length;
 
-            auto ber_name = BER::ElementBuilder::parse(data.substr(offset));
-            auto name = static_cast<BER::String*>(ber_name.first);
-            offset += ber_name.second;
+            auto name_parsed = BER::ElementBuilder::parse<BER::String>(data.substr(offset));
+            offset += name_parsed.length;
 
-            auto ber_password = BER::ElementBuilder::parse(data.substr(offset));
-            auto password = static_cast<BER::SimpleAuth*>(ber_password.first);
-            offset += ber_password.second;
+            auto password_parsed = BER::ElementBuilder::parse<BER::SimpleAuth>(data.substr(offset));
+            offset += password_parsed.length;
 
-            auto bindRequest = new BindRequest(name, password);
-            return bindRequest;
+            auto bind_request = make_unique<BindRequest>(move(name_parsed.value), move(password_parsed.value));
+            return BER::ParseResult<BindRequest> {move(bind_request), offset};
         }
     };
 
@@ -557,88 +587,88 @@ namespace LDAP
          BER::String error_message;
      public:
          BindResponse(Protocol::ResultCode resultCode, string matched_dn = "", string error_message = "")
-                 : BaseMsg(Protocol::Type::BindResponse),
-                   resultCode((uint8_t)resultCode),
-                   matched_dn(std::move(matched_dn)),
-                   error_message(std::move(error_message))
+         : BaseMsg(Protocol::Type::BindResponse),
+           resultCode((uint8_t)resultCode),
+           matched_dn(std::move(matched_dn)),
+           error_message(std::move(error_message))
          {
-             this->op.addElement(new BER::Enum<uint8_t>(static_cast<unsigned char>(resultCode)))
-                     .addElement(new BER::String(matched_dn))
-                     .addElement(new BER::String(error_message));
+             this->op.addElement(make_unique<BER::Enum<uint8_t>>(this->resultCode))
+                     .addElement(make_unique<BER::String>(this->matched_dn))
+                     .addElement(make_unique<BER::String>(this->error_message));
          }
-         BindResponse(BER::Enum<uint8_t>* resultCode, BER::String* matched_dn, BER::String* error_message)
-                 : BaseMsg(Protocol::Type::BindResponse),
-                   resultCode(std::move(*resultCode)),
-                   matched_dn(std::move(*matched_dn)),
-                   error_message(std::move(*error_message))
+         BindResponse(unique_ptr<BER::Enum<uint8_t>> resultCode, unique_ptr<BER::String> matched_dn, unique_ptr<BER::String> error_message)
+         : BaseMsg(Protocol::Type::BindResponse),
+           resultCode(std::move(*resultCode)),
+           matched_dn(std::move(*matched_dn)),
+           error_message(std::move(*error_message))
          {
-             this->op.addElement(&this->resultCode)
-                     .addElement(&this->matched_dn)
-                     .addElement(&this->error_message);
+             this->op.addElement(make_unique<BER::Enum<uint8_t>>(this->resultCode))
+                     .addElement(make_unique<BER::String>(this->matched_dn))
+                     .addElement(make_unique<BER::String>(this->error_message));
          }
-         static BindResponse* parse(string data)
+         static unique_ptr<BindResponse> parse(string data)
          {
              size_t offset = 0;
 
-             auto ber_result_code = BER::ElementBuilder::parse(data.substr(offset));
-             auto result_code = static_cast<BER::Enum<uint8_t>*>(ber_result_code.first);
-             offset += ber_result_code.second;
 
-             auto ber_matched_dn = BER::ElementBuilder::parse(data.substr(offset));
-             auto matched_dn = static_cast<BER::String*>(ber_matched_dn.first);
-             offset += ber_matched_dn.second;
+             auto res = BER::ElementBuilder::parse(data.substr(offset));
+             auto ber_result_code = res.value->as<BER::Enum<uint8_t>>(move(res.value));
+             offset += res.length;
 
-             auto ber_error_message = BER::ElementBuilder::parse(data.substr(offset));
-             auto error_message = static_cast<BER::String*>(ber_error_message.first);
-             offset += ber_error_message.second;
+             res = BER::ElementBuilder::parse(data.substr(offset));
+             auto ber_matched_dn = res.value->as<BER::String>(move(res.value));
+             offset += res.length;
 
-             auto bindResponse = new BindResponse(result_code, matched_dn, error_message);
-             return bindResponse;
+             res = BER::ElementBuilder::parse(data.substr(offset));
+             auto ber_error_message = res.value->as<BER::String>(move(res.value));
+             offset += res.length;
+
+             return make_unique<BindResponse>(move(ber_result_code), move(ber_matched_dn), move(ber_error_message));
          }
      };
 
-    class SearchRequest : public BaseMsg
-    {
-        BER::String baseObject;
-        BER::Enum<Protocol::SearchRequest::Scope> scope;
-        BER::Enum<Protocol::SearchRequest::DerefAliases> derefAliases;
-        BER::Integer sizeLimit;
-        BER::Integer timeLimit;
-        BER::Bool typesOnly;
-        BER::Filter filter;
-        BER::Attribute attribute;
-    public:
-        SearchRequest(string baseObject,
-                      string filterType,
-                      string filterValue,
-                      string attribute,
-                      Protocol::SearchRequest::Scope scope = Protocol::SearchRequest::Scope::SingleLevel,
-                      Protocol::SearchRequest::DerefAliases derefAliases = Protocol::SearchRequest::DerefAliases::NeverDerefAliases,
-                      bool typesOnly = false)
-        : BaseMsg(Protocol::Type::SearchRequest),
-          baseObject(BER::String(std::move(baseObject))),
-          scope(BER::Enum<Protocol::SearchRequest::Scope>(scope)),
-          derefAliases(BER::Enum<Protocol::SearchRequest::DerefAliases>(derefAliases)),
-          sizeLimit(BER::Integer(0)),
-          timeLimit(BER::Integer(0)),
-          typesOnly(BER::Bool(typesOnly)),
-          filter(BER::Filter(std::move(filterType), std::move(filterValue))),
-          attribute(BER::Attribute(std::move(attribute)))
-        {
-            this->op
-                .addElement(&this->baseObject)
-                .addElement(&this->scope)
-                .addElement(&this->derefAliases)
-                .addElement(&this->sizeLimit)
-                .addElement(&this->timeLimit)
-                .addElement(&this->typesOnly)
-                .addElement(&this->filter)
-                .addElement(&this->attribute);
-        }
-
+//    class SearchRequest : public BaseMsg
+//    {
+//        BER::String baseObject;
+//        BER::Enum<Protocol::SearchRequest::Scope> scope;
+//        BER::Enum<Protocol::SearchRequest::DerefAliases> derefAliases;
+//        BER::Integer sizeLimit;
+//        BER::Integer timeLimit;
+//        BER::Bool typesOnly;
+//        BER::Filter filter;
+//        BER::Attribute attribute;
+//    public:
+//        SearchRequest(string baseObject,
+//                      string filterType,
+//                      string filterValue,
+//                      string attribute,
+//                      Protocol::SearchRequest::Scope scope = Protocol::SearchRequest::Scope::SingleLevel,
+//                      Protocol::SearchRequest::DerefAliases derefAliases = Protocol::SearchRequest::DerefAliases::NeverDerefAliases,
+//                      bool typesOnly = false)
+//        : BaseMsg(Protocol::Type::SearchRequest),
+//          baseObject(BER::String(std::move(baseObject))),
+//          scope(BER::Enum<Protocol::SearchRequest::Scope>(scope)),
+//          derefAliases(BER::Enum<Protocol::SearchRequest::DerefAliases>(derefAliases)),
+//          sizeLimit(BER::Integer(0)),
+//          timeLimit(BER::Integer(0)),
+//          typesOnly(BER::Bool(typesOnly)),
+//          filter(BER::Filter(std::move(filterType), std::move(filterValue))),
+//          attribute(BER::Attribute(std::move(attribute)))
+//        {
+//            this->op
+//                .addElement(&this->baseObject)
+//                .addElement(&this->scope)
+//                .addElement(&this->derefAliases)
+//                .addElement(&this->sizeLimit)
+//                .addElement(&this->timeLimit)
+//                .addElement(&this->typesOnly)
+//                .addElement(&this->filter)
+//                .addElement(&this->attribute);
+//        }
+//
 //        static SearchRequest parse(string msg) {
 //            size_t offset = 0;
 //
 //        }
-    };
+//    };
 }
