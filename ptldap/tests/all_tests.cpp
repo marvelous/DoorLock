@@ -52,6 +52,10 @@ TEST_CASE( "Parse BER::String", "[BER::String]" ) {
     auto ber_string = BER::String(expected_str);
 
     REQUIRE( ber_string.value == expected_str );
+    REQUIRE( ber_string.str() == "\x04\x0d" "I like trains"s );
+
+    auto ber_string_empty = BER::String("");
+    REQUIRE( ber_string_empty.str() == "\x04\x00"s );
 
     ostringstream oss;
     oss << "\x04" << (char)expected_str.size() << expected_str;
@@ -96,6 +100,25 @@ TEST_CASE( "Parse a BindRequest", "[bindRequest]" ) {
 
     REQUIRE( bind_request->name.value == expected_login );
     REQUIRE( bind_request->password.value == expected_password );
+}
+
+TEST_CASE( "Generate a BindResponse", "[bindResponse]" ) {
+    LDAP::MsgBuilder::reset_id();
+    auto expected_str = "\x30\x0c\x02\x01\x01\x61\x07\x0a\x01\x00\x04\x00\x04\x00"s;
+    auto msg_str = LDAP::BindResponse(LDAP::Protocol::ResultCode::Success).str();
+
+    REQUIRE( msg_str.size() == expected_str.size() );
+
+    for (size_t i = 0 ; i < expected_str.size(); i++) {
+        int expected_chr = (uint8_t)expected_str.c_str()[i];
+        int msg_chr = (uint8_t)msg_str.c_str()[i];
+
+        INFO("Error at index " << i);
+        INFO("Got " << hex(msg_chr, 2) << ", expected " << hex(expected_chr, 2));
+        CHECK(msg_chr == expected_chr);
+    }
+
+    REQUIRE( memcmp(expected_str.c_str(), msg_str.c_str(), expected_str.size()) == 0);
 }
 
 TEST_CASE( "Generate a SearchRequest", "[searchRequest]" ) {

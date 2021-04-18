@@ -26,7 +26,7 @@ const uint16_t port = LDAP_PORT;
 #include "server.h"
 
 // This file should contains the login for the LDAP
-// You can disallow anonymous access to the badge ID people can't be imperssonated
+// You can disallow anonymous access to the badge ID so people can't be impersonated
 // It should contain the following value:
 /*
 const char* ldap_login = "cn=DoorLockCN,ou=DoorLockOU,dc=DoorLockDC";
@@ -42,7 +42,7 @@ void setup() {
   Serial.print("Connecting to ");
   Serial.println(ssid);
 
-  // Wait a bit, can help when resetting or reflashing some times
+  // Wait a bit, can help when resetting or reflashing sometimes
   delay(1000);
 
   FastLED.addLeds<WS2812, D3, GRB>(leds, NUM_LEDS);
@@ -170,7 +170,7 @@ void loop() {
   Serial.println("sending data to server");
   if (client.connected()) {
     auto req = LDAP::SearchRequest(ldap_member_group,
-                                   "badgenuid", 
+                                   "badgenuid",
                                    badgenuidstr,
                                    "cn").str();
     Serial.println(">SearchRequest");

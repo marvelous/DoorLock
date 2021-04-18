@@ -550,24 +550,52 @@ namespace LDAP
         }
     };
 
-//     class BindResponse : public BaseMsg
-//     {
-//     public:
-//         BindResponse(Protocol::ResultCode resultCode) : BaseMsg(Protocol::Type::BindResponse)
-//         {
-//             this->op.addElement(new BER::Integer<uint8_t>(static_cast<unsigned char>(resultCode)));
-//         }
-//
-//         static parse(string msg)
-//         {
-//             // size_t i = 0;
-//             // while(i < msg.size)
-//             // {
-//             //     void* ptr = &msg.c_str[i];
-//             //     (BER::Integer<uint8_t>*)ptr
-//             // }
-//         }
-//     };
+     class BindResponse : public BaseMsg
+     {
+         BER::Enum<uint8_t> resultCode;
+         BER::String matched_dn;
+         BER::String error_message;
+     public:
+         BindResponse(Protocol::ResultCode resultCode, string matched_dn = "", string error_message = "")
+                 : BaseMsg(Protocol::Type::BindResponse),
+                   resultCode((uint8_t)resultCode),
+                   matched_dn(std::move(matched_dn)),
+                   error_message(std::move(error_message))
+         {
+             this->op.addElement(new BER::Enum<uint8_t>(static_cast<unsigned char>(resultCode)))
+                     .addElement(new BER::String(matched_dn))
+                     .addElement(new BER::String(error_message));
+         }
+         BindResponse(BER::Enum<uint8_t>* resultCode, BER::String* matched_dn, BER::String* error_message)
+                 : BaseMsg(Protocol::Type::BindResponse),
+                   resultCode(std::move(*resultCode)),
+                   matched_dn(std::move(*matched_dn)),
+                   error_message(std::move(*error_message))
+         {
+             this->op.addElement(&this->resultCode)
+                     .addElement(&this->matched_dn)
+                     .addElement(&this->error_message);
+         }
+         static BindResponse* parse(string data)
+         {
+             size_t offset = 0;
+
+             auto ber_result_code = BER::ElementBuilder::parse(data.substr(offset));
+             auto result_code = static_cast<BER::Enum<uint8_t>*>(ber_result_code.first);
+             offset += ber_result_code.second;
+
+             auto ber_matched_dn = BER::ElementBuilder::parse(data.substr(offset));
+             auto matched_dn = static_cast<BER::String*>(ber_matched_dn.first);
+             offset += ber_matched_dn.second;
+
+             auto ber_error_message = BER::ElementBuilder::parse(data.substr(offset));
+             auto error_message = static_cast<BER::String*>(ber_error_message.first);
+             offset += ber_error_message.second;
+
+             auto bindResponse = new BindResponse(result_code, matched_dn, error_message);
+             return bindResponse;
+         }
+     };
 
     class SearchRequest : public BaseMsg
     {
