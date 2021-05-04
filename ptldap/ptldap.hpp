@@ -1,4 +1,6 @@
 // For more inspiration, see https://github.com/wireshark/wireshark/blob/master/epan/dissectors/packet-ldap.c
+// and http://luca.ntop.org/Teaching/Appunti/asn1.html
+// and https://ldap.com/ldapv3-wire-protocol-reference-asn1-ber/
 
 #include <string>
 #include <type_traits>
@@ -8,26 +10,22 @@
 #include <memory>
 #include <iostream>
 #include <cstring>
+#include <optional>
 
 #include "string_view.hpp"
 using namespace nonstd::literals;
 using namespace nonstd;
 
-using namespace std;
 
-template<typename TO, typename FROM>
-static unique_ptr<TO> static_unique_pointer_cast (unique_ptr<FROM>&& old){
-    // conversion: unique_ptr<FROM>->FROM*->TO*->unique_ptr<TO>
-    return unique_ptr<TO>{static_cast<TO*>(old.release())};
-}
+using namespace std;
 
 namespace BER
 {
-    template <typename T>
-    struct ParseResult {
-        unique_ptr<T> value;
-        size_t length;
-    };
+//    template <typename T>
+//    struct ParseResult {
+//        shared_ptr<T> value;
+//        size_t length;
+//    };
 
     enum class Type : uint8_t
     {
@@ -56,6 +54,11 @@ namespace BER
         ExtensibleMatch,
     };
 
+//    struct Header {
+//        Type type;
+//        size_t length;
+//    };
+
     enum class MatchingRuleAssertion
     {
         MatchingRule = 0x81,
@@ -64,611 +67,462 @@ namespace BER
         DnAttributes,
     };
 
+    static const uint8_t HeaderTagMinSize = 1;
+    static const uint8_t HeaderLengthMinSize = 1;
 
-    class Element
-    {
-    public:
-        Type type;
-        explicit Element(Type type) : type(type) {}
-        string str()
-        {
-            ostringstream oss;
-            this->append(oss);
-            return oss.str();
-        }
-        virtual ostringstream &append(ostringstream &oss) = 0;
-        template <typename T>
-        static unique_ptr<T> as(unique_ptr<Element> element) {
-            return static_unique_pointer_cast<T>(move(element));
-        }
-        template <typename T>
-        static ParseResult<T> parse(string_view data) {};
+    static const uint8_t HeaderTypeNumberNBits   = 5;
+    static const uint8_t HeaderTypeEncodingNBits = 1;
+    static const uint8_t HeaderTypeClassNBits    = 2;
+
+    static const uint8_t HeaderTypeTagShift      = 0;
+    static const uint8_t HeaderTypeEncodingShift = HeaderTypeTagShift + HeaderTypeNumberNBits;
+    static const uint8_t HeaderTypeClassShift    = HeaderTypeEncodingShift + HeaderTypeEncodingNBits;
+
+    static const uint8_t HeaderTypeNumberLongShift = 7;
+    static const uint8_t HeaderTypeNumberLongMask  = (1 << HeaderTypeNumberLongShift);
+
+//    static const uint8_t HeaderTypeTagBits      = ((1 << HeaderTypeNumberNBits) - 1);
+//    static const uint8_t HeaderTypeEncodingBits = ((1 << HeaderTypeEncodingNBits) - 1);
+//    static const uint8_t HeaderTypeClassBits    = ((1 << HeaderTypeClassNBits) - 1);
+
+//    static const uint8_t HeaderTypeTagMask      = (HeaderTypeTagBits << HeaderTypeTagShift);
+//    static const uint8_t HeaderTypeEncodingMask = (HeaderTypeEncodingBits << HeaderTypeEncodingShift);
+//    static const uint8_t HeaderTypeClassMask    = (HeaderTypeClassBits << HeaderTypeClassShift);
+
+
+    enum HeaderTagNumber {
+        Boolean = 0x01,
+        Integer = 0x02,
+        BitString = 0x03,
+        OctetString = 0x04,
+        Null = 0x05,
+        ObjectIdentifier = 0x06,
+        Sequence = 0x10,
+        SequenceOf = 0x10,
+        Set = 0x11,
+        SetOf = 0x11,
+        PrintableString = 0x13,
+        T61String = 0x14,
+        IA5String = 0x16,
+        UTCTime = 0x17,
+        ExtendedType = 0x1F,
     };
 
-    class Bool : public Element
-    {
-        Bool() : Element(Type::Bool), value(false) {}
-    public:
-        bool value;
-
-        explicit Bool(bool value) : Element(Type::Bool), value(value) {}
-        ostringstream &append(ostringstream &oss) final
-        {
-            oss << (char)this->type;
-            oss << (char)sizeof(bool);
-            oss << (char)this->value;
-            return oss;
-        }
-        template <typename T=Bool>
-        static ParseResult<T> parse(string_view data)
-        {
-            size_t offset = 0;
-            uint8_t type = data[offset++];
-            uint8_t size = data[offset++];
-            uint8_t payload = data[offset++];
-
-            if ((Type)type != Type::Bool) {
-                return ParseResult<T> {nullptr, 0};
-            }
-
-            return ParseResult<T> {make_unique<Bool>(!!payload), offset };
-        }
+    enum HeaderTagType {
+        Primitive,
+        Constructed,
     };
 
-    class Integer : public Element
-    {
-    public:
-        uint32_t value;
-        explicit Integer(uint32_t value, Type type = Type::Integer) : Element(type), value(value) {}
-        ostringstream &append(ostringstream &oss) final
-        {
-            uint8_t size = 1;
-            if (value != 0) {
-                size = (int)log2(value - 1) / 8 + 1;
-            }
-
-            oss << (char)this->type;
-            oss << (char)size;
-            for(size_t i = 0; i < size; i++) {
-                auto shift = ((size-1-i)*8);
-                uint8_t byte = (value >> shift) & 0xff;
-                oss << (uint8_t)byte;
-            }
-            return oss;
-        }
-        template <typename T=Integer>
-        static ParseResult<T> parse(string_view data)
-        {
-            size_t offset = 0;
-            uint8_t type = data.data()[offset++];
-            uint8_t size = data.data()[offset++];
-
-            if ((Type)type != Type::Integer && (Type)type != Type::Enum) {
-                return ParseResult<T> {nullptr, 0};
-            }
-
-            size_t value = 0;
-            for (size_t i = 0; i < size; i++)
-            {
-                value += data.data()[offset++] << (i*8);
-            }
-            return ParseResult<T> {std::make_unique<Integer>(value), offset};
-        }
+    enum HeaderTagClass {
+        Universal,
+        Application,
+        ContextSpecific,
+        Private,
     };
 
-    template <typename E>
-    class Enum : public Integer
-    {
+
+    struct __attribute__ ((packed)) HeaderTag {
     public:
-        explicit Enum(E value) : Integer(static_cast<uint32_t>(value), Type::Enum) {}
-
-        template <typename T=Enum<E>>
-        static ParseResult<T> parse(string data)
-        {
-            size_t offset = 0;
-            uint8_t type = data[offset++];
-            uint8_t size = data[offset++];
-
-            if ((Type)type != Type::Enum) {
-                return ParseResult<T> {nullptr, 0};
-            }
-
-            if (sizeof(E) < size) {
-                return ParseResult<T> {nullptr, 0};
-            }
-
-            size_t value = 0;
-            for (size_t i = 0; i < size; i++)
-            {
-                value += data[offset++] << (i*8);
-            }
-            return ParseResult<T> {make_unique<T>((E)value), offset};
-        }
-    };
-
-    class String : public Element
-    {
-    public:
-        string value;
-        explicit String(uint8_t len, const char *value, Type type = Type::String) : Element(type),
-                                                                                    value(string(value, len)) {}
-        explicit String(string value, Type type = Type::String) : Element(type), value(std::move(value)) {}
-        ostringstream &append(ostringstream &oss) final
-        {
-            oss << (char)this->type;
-            oss << (char)value.length();
-            oss << this->value;
-            return oss;
-        }
-        template <typename T=String>
-        static ParseResult<T> parse(string_view data)
-        {
-            size_t offset = 0;
-            uint8_t type = data[offset++];
-            uint8_t size = data[offset++];
-            string payload;
-
-            if ((Type)type != Type::String) {
-                return ParseResult<T> {nullptr, 0};
-            }
-
-            for(size_t i = 0; i < size; i++) {
-                payload += data[offset++];
-            }
-            return ParseResult<T> {make_unique<T>(payload), offset};
-        }
-    };
-
-    // This implementation is inexact
-    class SimpleAuth : public String
-    {
-    public:
-        explicit SimpleAuth(uint8_t len, const char *value) : String(len, value, Type::SimpleAuth) {}
-        explicit SimpleAuth(string value) : String(std::move(value), Type::SimpleAuth) {}
-
-        template <typename T>
-        static ParseResult<T> parse(string_view data)
-        {
-            size_t offset = 0;
-            uint8_t type = data[offset++];
-            uint8_t size = data[offset++];
-            string payload;
-
-            if ((Type)type != Type::SimpleAuth) {
-                return ParseResult<T> {nullptr, 0};
-            }
-
-            for(size_t i = 0; i < size; i++) {
-                payload += data[offset++];
-            }
-            return ParseResult<T> {make_unique<T>(payload), offset};
-        }
-    };
-
-    // This implementation is inexact, only support simple extensibleMatch
-    class Filter : public Element
-    {
-    protected:
-        string filterType;
-        string matchValue;
-
-    public:
-        explicit Filter(uint8_t filterTypeLen, const char *filterType, uint8_t matchValueLen, const char *matchValue, Type type = Type::ExtensibleMatch) : Element(type),
-                                                                                                                                                           filterType(string(filterType, filterTypeLen)),
-                                                                                                                                                           matchValue(string(matchValue, matchValueLen)) {}
-        explicit Filter(string filterType, string matchValue, Type type = Type::ExtensibleMatch) : Element(type), filterType(std::move(filterType)), matchValue(std::move(matchValue)) {}
-        ostringstream &append(ostringstream &oss) final
-        {
-            auto _filterType = String(this->filterType, static_cast<Type>(MatchingRuleAssertion::Type));
-            auto _matchValue = String(this->matchValue, static_cast<Type>(MatchingRuleAssertion::MatchValue));
-            auto extensibleMatchLength = _filterType.str().length() + _matchValue.str().length();
-
-            oss << (char)this->type;
-            oss << (char)extensibleMatchLength;
-            oss << _filterType.str();
-            oss << _matchValue.str();
-            return oss;
-        }
-    };
-
-    // This implementation is inexact
-    class Attribute : public Element
-    {
-    protected:
-        string value;
-
-    public:
-        explicit Attribute(uint8_t attributeLen, const char *attribute) : Element(Type::Attribute),
-                                                                          value(string(attribute, attributeLen)) {}
-        explicit Attribute(string value) : Element(Type::Attribute), value(value) {}
-        ostringstream &append(ostringstream &oss) final
-        {
-            auto attribute = String(this->value);
-
-            oss << (char)this->type;
-            oss << (char)attribute.str().length();
-            oss << attribute.str();
-            return oss;
-        }
-    };
-
-    class ElementBuilder
-    {
-    public:
-        ElementBuilder() = default;
-        template <typename T=Element>
-        static ParseResult<T> parse(string_view data) {
-            Type type = static_cast<Type>(data[0]);
-            switch(type) {
-                case Type::Bool: {
-                    return Bool::parse<T>(data);
-                }
-                case Type::Integer: {
-                    return Integer::parse<T>(data);
-//                    auto res = Integer::parse(data);
-//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
-                }
-                case Type::String: {
-                    return String::parse<T>(data);
-//                    auto res = String::parse(data);
-//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
-                }
-                case Type::Enum: {
-                    return Integer::parse<T>(data);
-//                    auto res = Integer::parse(data);
-//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
-                }
-                case Type::Attribute: {
-                    return String::parse<T>(data);
-//                    auto res = String::parse(data);
-//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
-                }
-                case Type::SimpleAuth: {
-                    return SimpleAuth::parse<T>(data);
-//                    auto res = SimpleAuth::parse(data);
-//                    return pair<Element*, size_t>(static_cast<Element *>(res.first), res.second);
-                }
-                default:
-                    return ParseResult<T> {nullptr, 0};
-            }
-        }
-    };
-}
-
-namespace LDAP
-{
-    const uint8_t Header = 0x30;
-
-    namespace Protocol
-    {
-        enum class Type : uint8_t
-        {
-            BindRequest = 0x60,
-            BindResponse,
-            UnbindRequest,
-            SearchRequest,
-            SearchResultEntry,
-            SearchResultDone,
-            SearchResultReference,
-            ModifyRequest,
-            ModifyResponse,
-            AddRequest,
-            AddResponse,
-            DelRequest,
-            DelResponse,
-            ModifyDNRequest,
-            ModifyDNResponse,
-            CompareRequest,
-            CompareResponse,
-            AbandonRequest,
-            ExtendedRequest,
-            ExtendedResponse,
-        };
-
-        enum class ResultCode : uint8_t
-        {
-            Success = 0,
-            OperationsError = 1,
-            ProtocolError = 2,
-            TimeLimitExceeded = 3,
-            SizeLimitExceeded = 4,
-            CompareFalse = 5,
-            CompareTrue = 6,
-            AuthMethodNotSupported = 7,
-            StrongAuthRequired = 8,
-            Referral = 10,
-            AdminLimitExceeded = 11,
-            UnavailableCriticalExtension = 12,
-            ConfidentialityRequired = 13,
-            SaslBindInProgress = 14,
-            NoSuchAttribute = 16,
-            UndefinedAttributeType = 17,
-            InappropriateMatching = 18,
-            ConstraintViolation = 19,
-            AttributeOrValueExists = 20,
-            InvalidAttributeSyntax = 21,
-            NoSuchObject = 32,
-            AliasProblem = 33,
-            InvalidDNSyntax = 34,
-            AliasDereferencingProblem = 36,
-            InappropriateAuthentication = 48,
-            InvalidCredentials = 49,
-            InsufficientAccessRights = 50,
-            Busy = 51,
-            Unavailable = 52,
-            UnwillingToPerform = 53,
-            LoopDetect = 54,
-            NamingViolation = 64,
-            ObjectClassViolation = 65,
-            NotAllowedOnNonLeaf = 66,
-            NotAllowedOnRDN = 67,
-            EntryAlreadyExists = 68,
-            ObjectClassModsProhibited = 69,
-            AffectsMultipleDSAs = 71,
-            Other = 80,
-            Canceled = 118,
-            NoSuchOperation = 119,
-            TooLate = 120,
-            CannotCancel = 121,
-        };
-
-        namespace SearchRequest
-        {
-            enum class Scope : uint8_t
-            {
-                BaseObject,
-                SingleLevel,
-                WholeSubtree
-            };
-
-            enum class DerefAliases : uint8_t
-            {
-                NeverDerefAliases,
-                DerefInSearching,
-                DerefFindingBaseObj,
-                DerefAlways
-            };
-        }
-
-        enum class FilterType
-        {
-            And = 0xa0,      // SET SIZE (1..MAX) OF filter Filter,
-            Or,              // SET SIZE (1..MAX) OF filter Filter,
-            Not,             // Filter,
-            EqualityMatch,   // AttributeValueAssertion,
-            Substrings,      // SubstringFilter,
-            GreaterOrEqual,  // AttributeValueAssertion,
-            LessOrEqual,     // AttributeValueAssertion,
-            Present,         // AttributeDescription,
-            ApproxMatch,     // AttributeValueAssertion,
-            ExtensibleMatch, // MatchingRuleAssertion,
-        };
-    }
-
-    class Op
-    {
+        HeaderTagNumber number: HeaderTypeNumberNBits;
+        bool is_constructed: HeaderTypeEncodingNBits;
+        HeaderTagClass asn1_class: HeaderTypeClassNBits;
     private:
-        Protocol::Type type;
-        vector<unique_ptr<BER::Element>> elements;
-
+        uint8_t* extra_tag_number;
     public:
-        explicit Op(Protocol::Type type) : type(type) {}
-        Op &addElement(unique_ptr<BER::Element> element)
-        {
-            elements.push_back(move(element));
-            return *this;
+
+        static constexpr HeaderTag* parse(const string_view raw) {
+            return static_cast<BER::HeaderTag*>((void*)raw.data());
         }
-        string str()
-        {
-            ostringstream inside;
-            for (auto& element : this->elements)
-            {
-                element->append(inside);
+
+        uint8_t get_size() const {
+            uint8_t size = 0;
+            // Check for high-tag-number form
+            if(number == HeaderTagNumber::ExtendedType) {
+                // Add 1 byte for every intermediate tag number
+                while((uint8_t)this->get_data_ptr()[size] & HeaderTypeNumberLongMask) {
+                    size += 1;
+                }
+                // Add final byte
+                size += 1;
             }
-            ostringstream oss;
-            oss << (char)this->type;
-            oss << (char)inside.str().length();
-            oss << inside.str();
-            return oss.str();
+            // Minimal size of the tag
+            size += 1;
+            return size;
         }
-        template <typename T=Op>
-        static BER::ParseResult<Op> parse(string_view data) {
-            size_t offset = 0;
-            auto type = static_cast<Protocol::Type>(data[offset++]);
-            uint8_t size = data[offset++];
 
-            auto op = new Op(type);
-            while (offset < size + offset) {
-                auto element_str = data.substr(offset);
-                auto res = BER::ElementBuilder::parse(element_str);
-                op->addElement(move(res.value));
-                offset += res.length;
+        constexpr char* buf_extra_tag_number() const {
+            return static_cast<char*>((void*)&this->extra_tag_number);
+        }
+
+        template<typename T = uint8_t>
+        constexpr T* get_data_ptr() const {
+            return static_cast<T*>((void*)&this->extra_tag_number);
+        }
+
+        inline string_view get_string_view() const {
+            return string_view(static_cast<const char *>((void*)this));
+        }
+    };
+
+    struct UsableDataSize {
+        size_t data_size;
+        bool is_usable;
+    };
+    struct __attribute__ ((packed)) HeaderLength {
+        uint8_t length: 7;
+        uint8_t is_long: 1;
+    private:
+        uint8_t* extra_length;
+    public:
+
+        static constexpr HeaderLength* parse(const string_view raw) {
+            return static_cast<BER::HeaderLength*>((void*)raw.data());
+        }
+
+        uint8_t length_at(const uint8_t offset) {
+            if(offset > length) {
+                return 0;
             }
-            return BER::ParseResult<Op> {make_unique<Op>(op), offset};
+            return (uint8_t) this->get_data_ptr()[offset];
+        }
+
+        constexpr uint8_t get_size() const {
+            return (!this->is_long) ? 1 : 1 + this->length;
+        }
+
+        template<typename T = uint8_t>
+        constexpr T* get_data_ptr() const {
+            return static_cast<T*>((void*)&this->extra_length);
+        }
+
+        constexpr string_view get_string_view() const {
+            return string_view(static_cast<const char *>((void*)this));
+        }
+
+        bool is_data_size_usable() const {
+            // Directly return true for short form
+            if (!this->is_long) return true;
+
+            // Check if the long-form size can be stored in size_t, because we are cowards
+            // If there is more bytes of length than what we can store in a size_t, check if there are empty
+            if(this->length > sizeof(size_t)) {
+                for(int i = 0; i < this->length - sizeof(size_t); i++) {
+                    if (this->extra_length[this->length-i-1] > 0)
+                        return false;
+                }
+            }
+            return true;
+        }
+
+        size_t get_data_size() const {
+            // Directly return the size for short form
+            if (!this->is_long)
+                return this->length;
+
+            // Compute the size only on the last bytes
+            size_t usable_size = 0;
+            for(uint8_t i = this->length - sizeof(size_t); i < this->length; i++) {
+                usable_size += this->extra_length[i];
+            }
+            return usable_size;
         }
     };
 
-    class Msg
-    {
-        uint8_t id;
-        Op *op;
+    struct Element {
+        const string_view data;
+
+        HeaderTag* tag = nullptr;
+        HeaderLength* length = nullptr;
+        string_view extra_data = {};
+
+//        virtual ~Element() {};
 
     public:
-        Msg(uint8_t id, Op *op) : id(id), op(op) {}
-        string str()
-        {
-            auto _id = BER::Integer(this->id).str();
-            auto _op = this->op->str();
-            uint8_t msgSize = _id.length() + _op.length();
+        explicit Element(const string_view raw) : data(raw) {}
 
-            ostringstream oss;
-            oss << Header;
-            oss << msgSize;
-
-            oss << _id;
-
-            oss << _op;
-            return oss.str();
-        }
-    };
-
-    class MsgBuilder
-    {
-    public:
-        #if (__cplusplus >= 201703L)
-        inline static uint8_t id;
-        #else
-        static uint8_t id;
-        #endif
-
-        MsgBuilder() = default;
-        static unique_ptr<Msg> build(Op *op) { return std::unique_ptr<Msg>(new Msg(id++, op)); }
-        static void reset_id() { id = 1; }
-    };
-
-    class BaseMsg
-    {
     protected:
-        Op op;
-        unique_ptr<Msg> msg;
-        explicit BaseMsg(Protocol::Type type) : op(Op(type)), msg(LDAP::MsgBuilder::build(&this->op)) {}
+        static shared_ptr<Element> parse_unchecked(shared_ptr<Element> element, const string_view raw) {
+            element->tag = HeaderTag::parse(raw);
+            element->length = HeaderLength::parse(&element->tag->get_string_view().data()[element->tag->get_size()]);
+            // Do not point to invalid data if the packet is not supposed to contain any
+            if (element->length->length > 0)
+                element->extra_data = &element->length->get_string_view().data()[element->length->get_size()];
+            return element;
+        }
+
+        static shared_ptr<Element> parse(shared_ptr<Element> element, const string_view raw) {
+            // Allocate a new Element
+            auto cur_offset = 0;
+            size_t data_size = 0;
+
+            // Parse the tag
+            element->tag = HeaderTag::parse(raw);
+            // Add the length of the tag to the parsed data offset
+            cur_offset += element->tag->get_size();
+            // Check if the raw data can fit the full tag and the minimum header length size
+            if (raw.size() < cur_offset + HeaderLengthMinSize) goto cleanup;
+
+            // Parse the length
+            element->length = HeaderLength::parse(&element->tag->get_string_view().data()[element->tag->get_size()]);
+            // Add the length of the tag to the parsed data offset
+            cur_offset += element->length->get_size();
+            // Check if the raw data can fit the whole header length size
+            if (raw.size() < cur_offset) goto cleanup;
+            // Check if we can fit the data length into a size_t to work on it after, because we are cowards and don't like BigInt
+            if (!element->length->is_data_size_usable()) goto cleanup;
+            // Get the data size
+            data_size = element->length->get_data_size();
+            if (data_size == 0) return element;
+            // Check if we can fit the data in the raw data, omit parsed data here to avoid overflow
+            if (raw.size() < data_size) goto cleanup;
+
+            // Save pointer to extra data if any
+            element->extra_data = &element->length->get_string_view().data()[element->length->get_size()];
+
+            return element;
+
+            cleanup:
+            return nullptr;
+        }
 
     public:
-        string str() { return this->msg->str(); }
+        static shared_ptr<Element> parse_unchecked(const string_view raw) {
+            auto element = shared_ptr<Element>(new Element(raw));
+            return parse_unchecked(move(element), raw);
+        }
+
+        static shared_ptr<Element> parse(const string_view raw) {
+            auto element = shared_ptr<Element>(new Element(raw));
+            return parse(move(element), raw);
+        }
+
+        template<typename T>
+        constexpr T* get_data_ptr(const size_t offset = 0) const {
+            return static_cast<T*>((void *) &this->extra_data.data()[offset]);
+        }
+        const size_t get_size() const {
+            return this->tag->get_size() + this->length->get_size() + this->length->get_data_size();
+        }
+
+        template<typename T>
+        shared_ptr<T> try_as() {
+            return static_pointer_cast<T>(shared_ptr<Element>(this));
+        }
     };
 
-    class BindRequest : public BaseMsg
-    {
+    // UniversalElement
+    template<HeaderTagNumber T> struct UniversalElement : Element {
     public:
-        BER::Integer version = BER::Integer(0x03);
-        BER::String name;
-        BER::SimpleAuth password;
-        BindRequest(string name, string password)
-        : BaseMsg(Protocol::Type::BindRequest),
-          name(BER::String(std::move(name))),
-          password(BER::SimpleAuth(std::move(password)))
-        {
-            this->op.addElement(make_unique<BER::Integer>(this->version)) // Supported LDAP version
-                .addElement(make_unique<BER::String>(this->name))
-                .addElement(make_unique<BER::SimpleAuth>(this->password));
+        static constexpr HeaderTagNumber type = T;
+    };
+
+    template<> struct UniversalElement<Null> : Element {
+    public:
+        static constexpr HeaderTagNumber type = Null;
+    };
+    typedef UniversalElement<Null> UniversalNull;
+
+    template<> struct UniversalElement<Boolean> : Element {
+    public:
+        static constexpr HeaderTagNumber type = Boolean;
+    private:
+        bool value = false;
+    public:
+        explicit UniversalElement(const string_view raw) : Element(raw) {}
+    private:
+        void compute_value() {
+            auto data_size = this->length->get_data_size();
+            if (data_size > sizeof(this->value)) return;
+            this->value = !!*this->get_data_ptr<uint8_t>();
         }
-        BindRequest(unique_ptr<BER::String> name, unique_ptr<BER::SimpleAuth> password)
-        : BaseMsg(Protocol::Type::BindRequest),
-          name(std::move(*name)),
-          password(std::move(*password))
+
+    public:
+        static shared_ptr<BER::UniversalElement<Boolean>> parse(string_view raw)
         {
-            this->op.addElement(make_unique<BER::Integer>(this->version)) // Supported LDAP version
-                    .addElement(make_unique<BER::String>(this->name))
-                    .addElement(make_unique<BER::SimpleAuth>(this->password));
+            auto universal_element = shared_ptr<UniversalElement>(new UniversalElement(raw));
+            auto element = static_pointer_cast<BER::UniversalElement<Boolean>>(Element::parse(move(universal_element), raw));
+            if (element == nullptr) return nullptr;
+            element->compute_value();
+            return element;
         }
-        static BER::ParseResult<BindRequest> parse(string data) {
+        constexpr const bool get_value() const {
+            return value;
+        }
+    };
+    typedef UniversalElement<Boolean> UniversalBoolean;
+
+    template<> struct UniversalElement<Integer> : Element {
+    public:
+        static constexpr HeaderTagNumber type = Integer;
+    private:
+        int32_t value = 0;
+    public:
+        explicit UniversalElement(const string_view raw) : Element(raw) {}
+    private:
+        void compute_value() {
+            const auto data_size = this->length->get_data_size();
+            if (data_size > sizeof(this->value)) return;
+
+            const int8_t first_byte = *this->get_data_ptr<int8_t>();
+            // We are dealing with a positive number
+            if(first_byte >= 0) {
+                for (size_t i = 0; i < data_size; i++) {
+                    this->value += this->get_data_ptr<uint8_t>()[i] << (8 * (data_size - i - 1));
+                }
+                return;
+            }
+            // We are dealing with a negative number
+            uint32_t unsigned_value = 0;
+            for(size_t i = 0; i < data_size; i++) {
+                unsigned_value += this->get_data_ptr<uint8_t>()[i] << (8*(sizeof(this->value)-i-1));
+            }
+            this->value = ((int32_t)unsigned_value >> (8 * (sizeof(this->value) - data_size)));
+        }
+    public:
+        static shared_ptr<BER::UniversalElement<Integer>> parse(string_view raw)
+        {
+            auto universal_element = shared_ptr<UniversalElement>(new UniversalElement(raw));
+            auto element = static_pointer_cast<BER::UniversalElement<Integer>>(Element::parse(move(universal_element), string_view(raw.data(), raw.size())));
+            if (element == nullptr) {
+                return nullptr;
+            }
+            element->compute_value();
+            return element;
+        }
+        static shared_ptr<UniversalElement> parse_unchecked(string_view raw)
+        {
+            auto universal_element = shared_ptr<UniversalElement>(new UniversalElement(raw));
+            auto element = static_pointer_cast<BER::UniversalElement<Integer>>(Element::parse_unchecked(move(universal_element), string_view(raw.data(), raw.size())));
+            if (element == nullptr) return nullptr;
+            element->compute_value();
+            return element;
+        }
+        constexpr const int32_t get_value() const {
+            return value;
+        }
+    };
+    typedef UniversalElement<Integer> UniversalInteger;
+
+
+    // TODO: support constructed strings
+    template<> struct UniversalElement<OctetString> : Element {
+    protected:
+        static constexpr HeaderTagNumber type = OctetString;
+    public:
+        explicit UniversalElement(const string_view raw) : Element(raw) {}
+        static shared_ptr<BER::UniversalElement<OctetString>> parse(string_view raw)
+        {
+            auto universal_element = shared_ptr<UniversalElement>(new UniversalElement(raw));
+            auto element = static_pointer_cast<BER::UniversalElement<OctetString>>(Element::parse(move(universal_element), raw));
+            if (element == nullptr) return nullptr;
+            return element;
+        }
+        constexpr const string_view get_value() const {
+            return extra_data;
+        }
+    };
+    template<> struct UniversalElement<IA5String> : UniversalElement<OctetString> {
+    public:
+        static constexpr HeaderTagNumber type = IA5String;
+    };
+    template<> struct UniversalElement<PrintableString> : UniversalElement<OctetString> {
+    public:
+        static constexpr HeaderTagNumber type = PrintableString;
+    };
+    template<> struct UniversalElement<T61String> : UniversalElement<OctetString> {
+    public:
+        static constexpr HeaderTagNumber type = T61String;
+    };
+    typedef UniversalElement<OctetString> UniversalOctetString;
+    typedef UniversalElement<IA5String> UniversalIA5String;
+    typedef UniversalElement<PrintableString> UniversalPrintableString;
+    typedef UniversalElement<T61String> UniversalT61String;
+
+    template<> struct UniversalElement<Sequence> : Element {
+    public:
+        static constexpr HeaderTagNumber type = Sequence;
+    private:
+        vector<shared_ptr<Element>> value;
+
+    public:
+        explicit UniversalElement(const string_view raw) : Element(raw) {}
+
+    private:
+        template <HeaderTagNumber N, typename T=UniversalElement<N>>
+        shared_ptr<T> make_shared_element(const char* data) {
+            return shared_ptr<T>(T::parse(static_cast<const char *>((void*)data)));
+        }
+
+        bool compute_value() {
+            auto data_size = this->length->get_data_size();
+
             size_t offset = 0;
+            while(offset < data_size) {
+                auto data = string_view(this->get_data_ptr<const char>(offset));
+                auto header_tag = BER::HeaderTag::parse(data);
 
-            // Only used to validate offset
-            auto version_parsed = BER::ElementBuilder::parse<BER::Integer>(data.substr(offset));
-            auto ber_version = move(version_parsed.value);
-            offset += version_parsed.length;
+                shared_ptr<Element> downgraded_element = nullptr;
+                switch(header_tag->number) {
+                    case Boolean: {
+                        auto universal_element = UniversalElement<Boolean>::parse(static_cast<const char *>((void*)data.data()));
+                        downgraded_element = static_pointer_cast<Element>(universal_element);
+                    } break;
 
-            auto name_parsed = BER::ElementBuilder::parse<BER::String>(data.substr(offset));
-            offset += name_parsed.length;
+                    case Integer: {
+                        auto universal_element = UniversalElement<Integer>::parse(static_cast<const char *>((void*)data.data()));
+                        downgraded_element = static_pointer_cast<Element>(universal_element);
+                    } break;
 
-            auto password_parsed = BER::ElementBuilder::parse<BER::SimpleAuth>(data.substr(offset));
-            offset += password_parsed.length;
+                    case BitString:
+                        break;
+                    case OctetString:
+                        break;
+                    case Null:
+                        break;
+                    case ObjectIdentifier:
+                        break;
+                    case Sequence:
+                        break;
+                    case Set:
+                        break;
+                    case PrintableString:
+                        break;
+                    case T61String:
+                        break;
+                    case IA5String:
+                        break;
+                    case UTCTime:
+                        break;
+                    case ExtendedType:
+                        break;
+                }
+                if (downgraded_element == nullptr) {
+                    for(auto& cur_element: this->value) {
+                        cur_element.reset();
+                    }
+                    return false;
+                }
 
-            auto bind_request = make_unique<BindRequest>(move(name_parsed.value), move(password_parsed.value));
-            return BER::ParseResult<BindRequest> {move(bind_request), offset};
+                offset += downgraded_element->get_size();
+                this->value.push_back(move(downgraded_element));
+            }
+            return true;
+        }
+    public:
+        static shared_ptr<BER::UniversalElement<Sequence>> parse(string_view raw)
+        {
+            auto universal_element = shared_ptr<UniversalElement>(new UniversalElement(raw));
+            auto element = static_pointer_cast<BER::UniversalElement<Sequence>>(Element::parse(universal_element, raw));
+            if (element == nullptr) return nullptr;
+            bool success = universal_element->compute_value();
+            if (!success) {
+                return nullptr;
+            }
+            return universal_element;
+        }
+        constexpr const vector<shared_ptr<Element>>& get_value() const {
+            return value;
         }
     };
-
-     class BindResponse : public BaseMsg
-     {
-         BER::Enum<uint8_t> resultCode;
-         BER::String matched_dn;
-         BER::String error_message;
-     public:
-         BindResponse(Protocol::ResultCode resultCode, string matched_dn = "", string error_message = "")
-         : BaseMsg(Protocol::Type::BindResponse),
-           resultCode((uint8_t)resultCode),
-           matched_dn(std::move(matched_dn)),
-           error_message(std::move(error_message))
-         {
-             this->op.addElement(make_unique<BER::Enum<uint8_t>>(this->resultCode))
-                     .addElement(make_unique<BER::String>(this->matched_dn))
-                     .addElement(make_unique<BER::String>(this->error_message));
-         }
-         BindResponse(unique_ptr<BER::Enum<uint8_t>> resultCode, unique_ptr<BER::String> matched_dn, unique_ptr<BER::String> error_message)
-         : BaseMsg(Protocol::Type::BindResponse),
-           resultCode(std::move(*resultCode)),
-           matched_dn(std::move(*matched_dn)),
-           error_message(std::move(*error_message))
-         {
-             this->op.addElement(make_unique<BER::Enum<uint8_t>>(this->resultCode))
-                     .addElement(make_unique<BER::String>(this->matched_dn))
-                     .addElement(make_unique<BER::String>(this->error_message));
-         }
-         static unique_ptr<BindResponse> parse(string data)
-         {
-             size_t offset = 0;
-
-
-             auto res = BER::ElementBuilder::parse(data.substr(offset));
-             auto ber_result_code = res.value->as<BER::Enum<uint8_t>>(move(res.value));
-             offset += res.length;
-
-             res = BER::ElementBuilder::parse(data.substr(offset));
-             auto ber_matched_dn = res.value->as<BER::String>(move(res.value));
-             offset += res.length;
-
-             res = BER::ElementBuilder::parse(data.substr(offset));
-             auto ber_error_message = res.value->as<BER::String>(move(res.value));
-             offset += res.length;
-
-             return make_unique<BindResponse>(move(ber_result_code), move(ber_matched_dn), move(ber_error_message));
-         }
-     };
-
-//    class SearchRequest : public BaseMsg
-//    {
-//        BER::String baseObject;
-//        BER::Enum<Protocol::SearchRequest::Scope> scope;
-//        BER::Enum<Protocol::SearchRequest::DerefAliases> derefAliases;
-//        BER::Integer sizeLimit;
-//        BER::Integer timeLimit;
-//        BER::Bool typesOnly;
-//        BER::Filter filter;
-//        BER::Attribute attribute;
-//    public:
-//        SearchRequest(string baseObject,
-//                      string filterType,
-//                      string filterValue,
-//                      string attribute,
-//                      Protocol::SearchRequest::Scope scope = Protocol::SearchRequest::Scope::SingleLevel,
-//                      Protocol::SearchRequest::DerefAliases derefAliases = Protocol::SearchRequest::DerefAliases::NeverDerefAliases,
-//                      bool typesOnly = false)
-//        : BaseMsg(Protocol::Type::SearchRequest),
-//          baseObject(BER::String(std::move(baseObject))),
-//          scope(BER::Enum<Protocol::SearchRequest::Scope>(scope)),
-//          derefAliases(BER::Enum<Protocol::SearchRequest::DerefAliases>(derefAliases)),
-//          sizeLimit(BER::Integer(0)),
-//          timeLimit(BER::Integer(0)),
-//          typesOnly(BER::Bool(typesOnly)),
-//          filter(BER::Filter(std::move(filterType), std::move(filterValue))),
-//          attribute(BER::Attribute(std::move(attribute)))
-//        {
-//            this->op
-//                .addElement(&this->baseObject)
-//                .addElement(&this->scope)
-//                .addElement(&this->derefAliases)
-//                .addElement(&this->sizeLimit)
-//                .addElement(&this->timeLimit)
-//                .addElement(&this->typesOnly)
-//                .addElement(&this->filter)
-//                .addElement(&this->attribute);
-//        }
-//
-//        static SearchRequest parse(string msg) {
-//            size_t offset = 0;
-//
-//        }
-//    };
+    typedef UniversalElement<Integer> UniversalInteger;
 }
