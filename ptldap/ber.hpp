@@ -114,7 +114,6 @@ namespace BER
         HeaderTagNumber number: HeaderTypeNumberNBits;
         bool is_constructed: HeaderTypeEncodingNBits;
         HeaderTagClass asn1_class: HeaderTypeClassNBits;
-    private:
         uint8_t extra_tag_number[];
     public:
 

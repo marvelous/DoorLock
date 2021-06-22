@@ -159,20 +159,104 @@ TEST_CASE( "Build BER::Element", "[BER::Element]" ) {
     }
 }
 
+namespace BER {
+    struct Header {
+        HeaderTag *tag;
+        HeaderLength *length;
+    };
+
+    struct Parser {
+        string_view data;
+        optional<Header> read_header() {
+            Header header;
+
+            // Parse the tag
+            header.tag = HeaderTag::parse(this->data);
+            // Add the length of the tag to the parsed data offset
+            auto tag_size = header.tag->get_size();
+            // Check if the raw data can fit the full tag and the minimum header length size
+            if (this->data.size() < tag_size + HeaderLengthMinSize) return nullopt;
+            this->data.remove_prefix(tag_size);
+
+            // Parse the length
+            header.length = HeaderLength::parse(this->data);
+            // Add the length of the tag to the parsed data offset
+            auto length_size = header.length->get_size();
+            // Check if the raw data can fit the whole header length size
+            if (this->data.size() < length_size) return nullopt;
+            // Check if we can fit the data length into a size_t to work on it after, because we are cowards and don't like BigInt
+            if (!header.length->is_data_size_usable()) return nullopt;
+            this->data.remove_prefix(length_size);
+
+            // Get the data size
+            size_t data_size = header.length->get_data_size();
+            // Check if we can fit the data in the raw data, omit parsed data here to avoid overflow
+            if (this->data.size() < data_size) return nullopt;
+
+            return header;
+        }
+        uint32_t read_uint32() {
+            uint32_t ret = 0;
+            for(size_t i = 0; i < sizeof(uint32_t); i++) {
+                ret += uint8_t(data[i]) << (8*(sizeof(uint32_t)-i-1));
+            }
+            data.remove_prefix(sizeof(uint32_t));
+            return ret;
+        }
+    };
+    template<typename Writer>
+    struct Serializer {
+        Writer writer;
+        void serialize_tag(const BER::HeaderTag& tag) {
+            // TODO: implement extended type
+            assert(tag.number != HeaderTagNumber::ExtendedType);
+            writer(string_view(reinterpret_cast<const char*>(&tag), tag.get_size()));
+        }
+        void serialize_length(const BER::HeaderLength& length) {
+            // TODO: implement long length
+            assert(!length.is_long);
+            writer(string_view(reinterpret_cast<const char*>(&length), length.get_size()));
+        }
+        void serialize_uint32(uint32_t integer) {
+            serialize_tag(BER::HeaderTag{BER::HeaderTagNumber::Integer, false, BER::HeaderTagClass::Universal});
+            serialize_length(BER::HeaderLength{4, false});
+            // TODO: optimize this
+            for(size_t i = 0; i < sizeof(uint32_t); i++) {
+                auto c = char((integer >> (8*(sizeof(uint32_t)-i-1))) & 0xff);
+                auto string = string_view(&c, 1);
+                writer(string);
+            }
+        }
+    };
+    template<typename Writer>
+    auto make_serializer(Writer writer) {
+        return Serializer<Writer>{writer};
+    }
+
+}
+
 TEST_CASE( "Parse BER::Element", "[BER::Element]" ) {
     SECTION("Simple Integer") {
         auto data = "\x02\x04\xDE\xAD\xBE\xEF"s;
-        SECTION("Unchecked") {
-            auto element_unchecked = BER::Element::parse_unchecked(data);
-            REQUIRE(element_unchecked != nullptr);
-            test(move(element_unchecked));
-        }
+        auto parser = BER::Parser{data};
+        auto header = parser.read_header();
+        REQUIRE(header);
+        REQUIRE(header->tag->number == BER::HeaderTagNumber::Integer);
+        REQUIRE(header->tag->is_constructed == false);
+        REQUIRE(header->tag->asn1_class == BER::HeaderTagClass::Universal);
 
-        SECTION("Checked") {
-            auto element_checked = BER::Element::parse(data);
-            REQUIRE(element_checked != nullptr);
-            test(move(element_checked));
-        }
+        REQUIRE(header->length->length == 4);
+        REQUIRE(header->length->is_long == false);
+
+        auto integer = parser.read_uint32();
+        REQUIRE(integer == 0xdeadbeef);
+    }
+    SECTION("Simple Integer") {
+        auto integer = 0xdeadbeef;
+        ostringstream stream;
+        auto serializer = BER::make_serializer([&stream](string_view output) {stream<<output;});
+        serializer.serialize_uint32(integer);
+        REQUIRE(stream.str() == "\x02\x04\xDE\xAD\xBE\xEF"s);
     }
 
     SECTION("Simple Integer") {
