@@ -1,4 +1,4 @@
-#include "ptldap/ptldap.hpp"
+#include "ber.hpp"
 uint8_t LDAP::MsgBuilder::id = 1;
 
 #include <sstream>

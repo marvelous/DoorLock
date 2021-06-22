@@ -1,7 +1,5 @@
 #define CATCH_CONFIG_FAST_COMPILE
 
-#include <memory>
-
 #include "catch.hpp"
 #include "tools.hpp"
 
@@ -9,7 +7,7 @@
 
 using namespace std;
 
-TEST_CASE( "Parse BER::HeaderTag", "[BER::HeaderTag]" ) {
+TEST_CASE( "Parse LDAP::BindRequest", "[BER::HeaderTag]" ) {
     SECTION("Simple Universal") {
         auto data = "\x02"s;
         auto ber_header_tag = BER::HeaderTag::parse(data);
@@ -147,20 +145,28 @@ TEST_CASE( "Parse BER::HeaderLength", "[BER::HeaderLength]" ) {
     }
 }
 
-TEST_CASE( "Build BER::Element", "[BER::Element]" ) {
-    SECTION("Simple Integer") {
-        auto ber_element = new BER::Element(BER::HeaderTagNumber::Integer, BER::Universal, 4);
-        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Integer);
-        REQUIRE(ber_element->tag->is_constructed == false);
-        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
-
-        REQUIRE(ber_element->length->length == 4);
-        REQUIRE(ber_element->length->is_long == false);
-    }
-}
-
 TEST_CASE( "Parse BER::Element", "[BER::Element]" ) {
     SECTION("Simple Integer") {
+        auto test = [](unique_ptr<BER::Element> ber_element) {
+            REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Integer);
+            REQUIRE(ber_element->tag->is_constructed == false);
+            REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
+
+            REQUIRE(ber_element->length->length == 4);
+            REQUIRE(ber_element->length->is_long == false);
+
+            // Do not parse as uint32_t as we don't know the endianness of the machine
+            auto data_ptr = ber_element->get_data_ptr<uint8_t>();
+            auto integer = ([data_ptr]() {
+                uint32_t ret = 0;
+                for(size_t i = 0; i < sizeof(uint32_t); i++) {
+                    ret +=  data_ptr[i] << (8*(sizeof(uint32_t)-i-1));
+                }
+                return ret;
+            })();
+            REQUIRE(integer == 0xdeadbeef);
+        };
+
         auto data = "\x02\x04\xDE\xAD\xBE\xEF"s;
         SECTION("Unchecked") {
             auto element_unchecked = BER::Element::parse_unchecked(data);
@@ -217,196 +223,121 @@ TEST_CASE( "Parse BER::Element", "[BER::Element]" ) {
     }
 }
 
-TEST_CASE( "Build BER::UniversalElement", "[BER::UniversalElement]" ) {
-    SECTION("Null") {
-        // Parse a valid null BER element
-        auto data = "\x05\x00"s;
-        auto ber_element = make_unique<BER::UniversalElement<BER::Null>>(data);
+TEST_CASE( "Parse BER::UniversalElement", "[BER::UniversalElement]" ) {
+    SECTION("Integer 8 bits") {
+        auto data = "\x02\x01\x01"s;
+        auto ber_element = BER::UniversalElement<BER::Integer>::parse(data);
 
-        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Null);
-        REQUIRE(ber_element->tag->is_constructed == false);
-        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
-
-        REQUIRE(ber_element->length->length == 0);
-        REQUIRE(ber_element->length->is_long == false);
-
-        // Parse an invalid boolean with some data length
-        auto invalid_data = "\x05\x01"s;
-        auto invalid_ber_element = make_unique<BER::UniversalElement<BER::Null>>(invalid_data);
-        REQUIRE(invalid_ber_element->state == BER::ElemStateType::ParsedInvalid);
-
-        // Build a null BER element
-        auto built_ber_element = make_unique<BER::UniversalElement<BER::Null>>();
-
-        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Null);
-        REQUIRE(ber_element->tag->is_constructed == false);
-        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
-
-        REQUIRE(ber_element->length->length == 0);
-        REQUIRE(ber_element->length->is_long == false);
-    }
-
-    SECTION("Boolean") {
-        // Parse a valid boolean BER element
-        auto data = "\x01\x01\x01"s;
-        auto ber_element = make_unique<BER::UniversalElement<BER::Boolean>>(data);
-
-        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Boolean);
+        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Integer);
         REQUIRE(ber_element->tag->is_constructed == false);
         REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
 
         REQUIRE(ber_element->length->length == 1);
         REQUIRE(ber_element->length->is_long == false);
 
-        REQUIRE(ber_element->get_value() == true);
-
-        // Parse an invalid boolean with data shorter than the length from the header
-        auto invalid_data = "\x01\x02\x01"s;
-        auto invalid_ber_element = make_unique<BER::UniversalElement<BER::Boolean>>(invalid_data);
-        REQUIRE(invalid_ber_element->state == BER::ElemStateType::ParsedInvalid);
-
-        // Build a boolean BER element
-        auto built_ber_element = make_unique<BER::UniversalElement<BER::Boolean>>(true);
-
-        REQUIRE(built_ber_element->tag->number == BER::HeaderTagNumber::Boolean);
-        REQUIRE(built_ber_element->tag->is_constructed == false);
-        REQUIRE(built_ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
-
-        REQUIRE(built_ber_element->length->length == 1);
-        REQUIRE(built_ber_element->length->is_long == false);
-
-        REQUIRE(built_ber_element->get_value() == true);
-
-        REQUIRE(built_ber_element->data == ber_element->data);
+        REQUIRE(ber_element->get_value() == 1);
     }
-    SECTION("Integers") {
-        auto run_test = [](int32_t value, int n_bytes) {
-            // Build a boolean BER element
-            auto built_ber_element = make_unique<BER::UniversalElement<BER::Integer>>(value);
+    SECTION("Integer positive 16 bits") {
+        auto data = "\x02\x03\x00\xDE\xAD"s;
+        auto ber_element = BER::UniversalInteger::parse(data);
 
-            REQUIRE(built_ber_element->tag->number == BER::HeaderTagNumber::Integer);
-            REQUIRE(built_ber_element->tag->is_constructed == false);
-            REQUIRE(built_ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
+        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Integer);
+        REQUIRE(ber_element->tag->is_constructed == false);
+        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
 
-            INFO("value = " << value);
-            REQUIRE(built_ber_element->length->length == n_bytes);
-            REQUIRE(built_ber_element->length->is_long == false);
+        REQUIRE(ber_element->length->length == 3);
+        REQUIRE(ber_element->length->is_long == false);
 
-            REQUIRE(built_ber_element->get_value() == value);
-            INFO("raw = " << string_view(built_ber_element->storage->data(), n_bytes + 2));
-
-            // Parse back the element
-            auto ber_element = make_unique<BER::UniversalElement<BER::Integer>>(string_view(built_ber_element->storage->data(), n_bytes + 2));
-            REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Integer);
-            REQUIRE(ber_element->tag->is_constructed == false);
-            REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
-
-            REQUIRE(ber_element->length->length == n_bytes);
-            REQUIRE(ber_element->length->is_long == false);
-
-            REQUIRE(ber_element->get_value() == value);
-        };
-        // Run the test at the limits
-        run_test(INT32_MIN, 4);
-        run_test(-(1 << 23) - 1, 4);
-        run_test(-(1 << 23), 3);
-        run_test(-(1 << 15) - 1, 3);
-        run_test(-(1 << 15), 2);
-        run_test(-(1 << 7) - 1, 2);
-        run_test(-(1 << 7), 1);
-        run_test(-1, 1);
-        run_test(0, 1);
-        run_test(1, 1);
-        run_test((1 << 7) - 1, 1);
-        run_test((1 << 7), 2);
-        run_test((1 << 15) - 1, 2);
-        run_test((1 << 15), 3);
-        run_test((1 << 23) - 1, 3);
-        run_test((1 << 23), 4);
-        run_test(INT32_MAX, 4);
-
-        // Some more tests from values here: http://luca.ntop.org/Teaching/Appunti/asn1.html
-        auto tests = {
-            pair(0, "\x02\x01\x00"s),
-            pair(127, "\x02\x01\x7F"s),
-            pair(128, "\x02\x02\x00\x80"s),
-            pair(256, "\x02\x02\x01\x00"s),
-            pair(-128, "\x02\x01\x80"s),
-            pair(-129, "\x02\x02\xFF\x7F"s),
-        };
-        for (const auto& test : tests) {
-            INFO("raw = " << test.second);
-            auto ber_element = make_unique<BER::UniversalElement<BER::Integer>>(test.second);
-            REQUIRE(ber_element->get_value() == test.first);
-        }
+        REQUIRE(ber_element->get_value() == 0xdead);
     }
 
+    SECTION("Integer negative 16 bits") {
+        auto data = "\x02\x02\xCF\xC7"s;
+        auto ber_element = BER::UniversalInteger::parse(data);
 
-//    SECTION("UniversalString") {
-//
-//      // Parse a valid boolean BER element
-//      auto data = "\x01\x01\x01"s;
-//      auto ber_element = make_unique<BER::UniversalElement<BER::String>>(data);
-//
-//      REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::String);
-//      REQUIRE(ber_element->tag->is_constructed == false);
-//      REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
-//
-//      REQUIRE(ber_element->length->length == 1);
-//      REQUIRE(ber_element->length->is_long == false);
-//
-//      REQUIRE(ber_element->get_value() == true);
-//
-//      // Parse an invalid boolean with data shorter than the length from the header
-//      auto invalid_data = "\x01\x02\x01"s;
-//      auto invalid_ber_element = make_unique<BER::UniversalElement<BER::Boolean>>(invalid_data);
-//      REQUIRE(invalid_ber_element->state == BER::ElemStateType::ParsedInvalid);
-//
-//      // Build a boolean BER element
-//      auto built_ber_element = make_unique<BER::UniversalElement<BER::Boolean>>(true);
-//
-//      REQUIRE(built_ber_element->tag->number == BER::HeaderTagNumber::Boolean);
-//      REQUIRE(built_ber_element->tag->is_constructed == false);
-//      REQUIRE(built_ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
-//
-//      REQUIRE(built_ber_element->length->length == 1);
-//      REQUIRE(built_ber_element->length->is_long == false);
-//
-//      REQUIRE(built_ber_element->get_value() == true);
-//
-//      REQUIRE(built_ber_element->data == ber_element->data);
-//    }
+        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Integer);
+        REQUIRE(ber_element->tag->is_constructed == false);
+        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
 
-//    SECTION("Sequence") {
-//        auto data = "\x10\x06\x01\x01\xff\x02\x01\x42"s;
-//        auto ber_element = BER::UniversalElement<BER::Sequence>::parse(data);
-//
-//        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Sequence);
-//        REQUIRE(ber_element->tag->is_constructed == false);
-//        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
-//
-//        REQUIRE(ber_element->length->length == 6);
-//        REQUIRE(ber_element->length->is_long == false);
-//
-//        auto vec = ber_element->get_value_ptr();
-//        REQUIRE(vec->size() == 2);
-//
-//        auto bool_ptr = ber_element->elem_at(0);
-//        REQUIRE(bool_ptr->tag->number == BER::HeaderTagNumber::Boolean);
-//
-//        auto bool_element = ber_element->casted_elem_at<BER::UniversalBoolean>(0);
-//        REQUIRE(bool_element != nullptr);
-//        REQUIRE(bool_element->get_value() == true);
-//
-//        auto int_element = ber_element->casted_elem_at<BER::UniversalInteger>(1);
-//        REQUIRE(int_element->get_value() == 0x42);
-//
-//        auto invalid_idx_ptr = ber_element->elem_at(2);
-//        REQUIRE(invalid_idx_ptr == nullptr);
-//        auto invalid_idx_ptr_int = ber_element->casted_elem_at<BER::UniversalInteger>(2);
-//        REQUIRE(invalid_idx_ptr_int == nullptr);
-//
-//        auto invalid_int_element = ber_element->casted_elem_at<BER::UniversalInteger>(0);
-//        REQUIRE(invalid_int_element == nullptr);
-//    }
+        REQUIRE(ber_element->length->length == 2);
+        REQUIRE(ber_element->length->is_long == false);
+
+        REQUIRE(ber_element->get_value() == -12345);
+    }
+
+    SECTION("UniversalInteger") {
+        auto data = "\x02\x01\x01"s;
+        auto ber_element = BER::UniversalInteger::parse(data);
+
+        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Integer);
+        REQUIRE(ber_element->tag->is_constructed == false);
+        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
+
+        REQUIRE(ber_element->length->length == 1);
+        REQUIRE(ber_element->length->is_long == false);
+
+        REQUIRE(ber_element->get_value() == 1);
+    }
+
+    SECTION("UniversalInteger 32 bits") {
+        auto data = "\x02\x04\xDE\xAD\x13\x37"s;
+        auto ber_element = BER::UniversalInteger::parse(data);
+
+        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Integer);
+        REQUIRE(ber_element->tag->is_constructed == false);
+        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
+
+        REQUIRE(ber_element->length->length == 4);
+        REQUIRE(ber_element->length->is_long == false);
+
+        REQUIRE(ber_element->get_value() == 0xdead1337);
+    }
+
+    SECTION("UniversalString") {
+        auto str = "hello"s;
+        auto data = "\x04\x05"s + str;
+        auto ber_element = BER::UniversalOctetString::parse(data);
+
+        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::OctetString);
+        REQUIRE(ber_element->tag->is_constructed == false);
+        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
+
+        REQUIRE(ber_element->length->length == 5);
+        REQUIRE(ber_element->length->is_long == false);
+
+        REQUIRE(ber_element->get_value() == str);
+    }
+
+    SECTION("Sequence") {
+        auto data = "\x10\x06\x01\x01\xff\x02\x01\x42"s;
+        auto ber_element = BER::UniversalElement<BER::Sequence>::parse(data);
+
+        REQUIRE(ber_element->tag->number == BER::HeaderTagNumber::Sequence);
+        REQUIRE(ber_element->tag->is_constructed == false);
+        REQUIRE(ber_element->tag->asn1_class == BER::HeaderTagClass::Universal);
+
+        REQUIRE(ber_element->length->length == 6);
+        REQUIRE(ber_element->length->is_long == false);
+
+        auto vec = ber_element->get_value_ptr();
+        REQUIRE(vec->size() == 2);
+
+        auto bool_ptr = ber_element->elem_at(0);
+        REQUIRE(bool_ptr->tag->number == BER::HeaderTagNumber::Boolean);
+
+        auto bool_element = ber_element->casted_elem_at<BER::UniversalBoolean>(0);
+        REQUIRE(bool_element != nullptr);
+        REQUIRE(bool_element->get_value() == true);
+
+        auto int_element = ber_element->casted_elem_at<BER::UniversalInteger>(1);
+        REQUIRE(int_element->get_value() == 0x42);
+
+        auto invalid_idx_ptr = ber_element->elem_at(2);
+        REQUIRE(invalid_idx_ptr == nullptr);
+        auto invalid_idx_ptr_int = ber_element->casted_elem_at<BER::UniversalInteger>(2);
+        REQUIRE(invalid_idx_ptr_int == nullptr);
+
+        auto invalid_int_element = ber_element->casted_elem_at<BER::UniversalInteger>(0);
+        REQUIRE(invalid_int_element == nullptr);
+    }
 };

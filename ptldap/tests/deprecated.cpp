@@ -3,7 +3,7 @@
 #include "catch.hpp"
 #include "tools.hpp"
 
-#include "../ptldap.hpp"
+#include "../ber.hpp"
 
 TEST_CASE( "Parse BER::Bool", "[BER::Bool]" ) {
     auto ber_bool_false = BER::Bool(false);
