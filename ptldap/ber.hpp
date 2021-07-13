@@ -16,8 +16,7 @@
 #include "bytes.hpp"
 #include <limits>
 
-namespace BER
-{
+namespace BER {
 
     enum TagNumber {
         Boolean = 0x01,
@@ -218,6 +217,20 @@ namespace BER
         return Reader<Bytes>{std::move(bytes)};
     }
 
+    struct BytesCounter {
+
+        size_t count = 0;
+
+        void write(uint8_t byte) {
+            ++count;
+        }
+
+        void write(std::string_view bytes) {
+            count += bytes.size();
+        }
+
+    };
+
     template<typename Bytes>
     struct Writer {
 
@@ -281,39 +294,63 @@ namespace BER
             bytes.write(value & 0b11111111);
         }
 
-        struct Sequence {
-
-            Bytes& bytes;
-            size_t index;
-
-            void write(uint8_t byte) {
-                bytes.write(byte);
-            }
-
-            void write(std::string_view bytes) {
-                this->bytes.write(bytes);
-            }
-
-            ~Sequence() {
-                // TODO: handle multi-byte length
-                bytes.string[index] = bytes.string.size() - index;
-            }
-
-        };
-        Writer<Sequence> write_sequence() {
+        template<typename ... Datas>
+        void write_sequence(Datas const& ... datas) {
             write_identifier(Identifier{TagClass::Universal, Encoding::Constructed, TagNumber::Sequence});
-            auto index = bytes.string.size();
-            write_length(Length(std::numeric_limits<std::int8_t>::max()));
-            return Writer<Sequence>{bytes, index};
+            auto counter = Writer<BytesCounter>{BytesCounter()};
+            counter.write_datas(datas...);
+            write_length(Length(counter.bytes.count));
+            write_datas(datas...);
         }
 
-        void write_octet_string(const Identifier& identifier, std::string_view dn) {
+        template<typename ... Datas>
+        void write_datas() {
+        }
+
+        template<typename Data, typename ... Datas>
+        void write_datas(Data const& data, Datas const& ... datas) {
+            write_data(*this, data);
+            write_datas(datas...);
+        }
+
+        template<typename Datas>
+        void write_sequence_container(Datas const& datas) {
+            write_identifier(Identifier{TagClass::Universal, Encoding::Constructed, TagNumber::Sequence});
+            auto counter = Writer<BytesCounter>{BytesCounter()};
+            counter.write_datas_container(datas);
+            write_length(Length(counter.bytes.count));
+            write_datas_container(datas);
+        }
+
+        template<typename Datas>
+        void write_datas_container(Datas const& datas) {
+            for (auto const& data : datas) {
+                write_data(*this, data);
+            }
+        }
+
+        void write_octet_string(std::string_view string) {
+            //TODO
+            write_octet_string(Identifier{}, string);
+        }
+
+        void write_octet_string(Identifier const& identifier, std::string_view string) {
             write_identifier(identifier);
-            write_length(Length(dn.size()));
-            bytes.write(dn);
+            write_length(Length(string.size()));
+            bytes.write(string);
         }
 
     };
+
+    template<typename Writer, typename Integer>
+    std::enable_if_t<std::is_integral<Integer>::value> write_data(Writer& writer, Integer integer) {
+        writer.write_integer(integer);
+    }
+
+    template<typename Writer>
+    void write_data(Writer& writer, std::string_view string) {
+        writer.write_octet_string(string);
+    }
 
     template<typename Bytes>
     auto make_writer(Bytes bytes) {

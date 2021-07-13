@@ -30,7 +30,7 @@ TEST_CASE("Parse LDAP::DelRequest") {
     CHECK(reader.ber.bytes.empty());
 
     auto writer = LDAP::make_writer(BER::make_writer(Bytes::StringWriter()));
-    writer.write_message(0x05).write_del_request({"dc=example,dc=com"sv});
+    writer.write_message(0x05, LDAP::DelRequest{"dc=example,dc=com"sv}, LDAP::Control{"1.2.840.113556.1.4.805"sv, true});
 
     printf("%zu %zu\n", writer.ber.bytes.string.size(), bytes.size());
     for (auto i = 0; i < std::min(writer.ber.bytes.string.size(), bytes.size()); ++i) {

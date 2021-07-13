@@ -6,8 +6,7 @@
 
 #include "ber.hpp"
 
-namespace LDAP
-{
+namespace LDAP {
 
     enum class TagNumber {
         DelRequest = 10,
@@ -24,7 +23,7 @@ namespace LDAP
     };
 
     template<typename BERReader>
-    struct Controls {
+    struct ControlsReader {
 
         BERReader ber;
 
@@ -45,7 +44,7 @@ namespace LDAP
     };
 
     template<typename BERReader>
-    struct Message {
+    struct MessageReader {
 
         int32_t message_id;
         BER::Identifier identifier;
@@ -62,14 +61,14 @@ namespace LDAP
             return DelRequest{dn};
         }
 
-        std::optional<Controls<BERReader>> read_controls() {
+        std::optional<ControlsReader<BERReader>> read_controls() {
             auto identifier = OPT_TRY(ber.read_identifier());
             OPT_REQUIRE(identifier.tag_class == BER::TagClass::ContextSpecific);
             OPT_REQUIRE(identifier.encoding == BER::Encoding::Constructed);
             OPT_REQUIRE(identifier.tag_number == 0);
 
             auto sequence = OPT_TRY(ber.read_sequence(identifier));
-            return Controls<BERReader>{std::move(sequence)};
+            return ControlsReader<BERReader>{std::move(sequence)};
         }
 
     };
@@ -79,7 +78,7 @@ namespace LDAP
 
         BERReader ber;
 
-        std::optional<Message<BERReader>> read_message() {
+        std::optional<MessageReader<BERReader>> read_message() {
             auto sequence = OPT_TRY(ber.read_sequence());
 
             auto message_id = OPT_TRY(sequence.template read_integer<int32_t>());
@@ -88,7 +87,7 @@ namespace LDAP
             auto identifier = OPT_TRY(sequence.read_identifier());
             OPT_REQUIRE(identifier.tag_class == BER::TagClass::Application);
 
-            return Message<BERReader>{message_id, identifier, std::move(sequence)};
+            return MessageReader<BERReader>{message_id, identifier, std::move(sequence)};
         }
 
     };
@@ -99,26 +98,18 @@ namespace LDAP
     }
 
     template<typename BERWriter>
-    struct MessageWriter {
-
-        BERWriter ber;
-
-        void write_del_request(const DelRequest& request) {
-            auto identifier = BER::Identifier{BER::TagClass::Application, BER::Encoding::Primitive, size_t(TagNumber::DelRequest)};
-            ber.write_octet_string(identifier, request.dn);
-        }
-
-    };
-
-    template<typename BERWriter>
     struct Writer {
 
         BERWriter ber;
 
-        auto write_message(int32_t message_id) {
-            auto sequence = ber.write_sequence();
-            sequence.write_integer(message_id);
-            return MessageWriter<typename BERWriter::Sequence>{sequence};
+        template<typename ProtocolOp>
+        void write_message(int32_t message_id, ProtocolOp const& protocol_op) {
+            ber.write_sequence(message_id, protocol_op);
+        }
+
+        template<typename ProtocolOp, typename ... Controls>
+        void write_message(int32_t message_id, ProtocolOp const& protocol_op, Controls const& ... controls) {
+            ber.write_sequence(message_id, protocol_op, std::initializer_list{controls...});
         }
 
     };
@@ -126,6 +117,33 @@ namespace LDAP
     template<typename BERWriter>
     auto make_writer(BERWriter ber) {
         return Writer<BERWriter>{std::move(ber)};
+    }
+
+    BER::Identifier protocol_op_identifier(TagNumber tag_number) {
+        return {BER::TagClass::Application, BER::Encoding::Primitive, static_cast<BER::TagNumber>(tag_number)};
+    }
+
+}
+
+namespace BER {
+
+    template<typename Writer>
+    void write_data(Writer& writer, LDAP::DelRequest const& request) {
+        writer.write_octet_string(LDAP::protocol_op_identifier(LDAP::TagNumber::DelRequest), request.dn);
+    }
+
+    template<typename Writer>
+    void write_data(Writer& writer, std::initializer_list<LDAP::Control> const& controls) {
+        writer.write_sequence_container(controls);
+    }
+
+    template<typename Writer>
+    void write_data(Writer& writer, LDAP::Control const& control) {
+        if (control.control_value) {
+            writer.write_sequence(control.control_type, control.criticality, *control.control_value);
+        } else {
+            writer.write_sequence(control.control_type, control.criticality);
+        }
     }
 
 }
