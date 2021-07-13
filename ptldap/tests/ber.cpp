@@ -20,12 +20,10 @@ TEST_CASE("Read BER::Identifier", "[BER::Identifier]") {
             CHECK(read.tag_number == tag_number);
             CHECK(reader.bytes.empty());
 
-            auto stream = ostringstream();
-            auto writer = BER::make_writer(Bytes::StreamWriter{stream});
+            auto writer = BER::make_writer(Bytes::StringWriter());
             writer.write_identifier(read);
-            auto string = stream.str();
 
-            CHECK(string == bytes);
+            CHECK(writer.bytes.string == bytes);
         }
     };
 
@@ -44,12 +42,10 @@ void test_length_definite(string const& section, string_view bytes_in, size_t le
         CHECK(read.length == length);
         CHECK(reader.bytes.empty());
 
-        auto stream = ostringstream();
-        auto writer = BER::make_writer(Bytes::StreamWriter{stream});
+        auto writer = BER::make_writer(Bytes::StringWriter());
         writer.write_length(read);
-        auto string = stream.str();
 
-        CHECK(string == bytes_out);
+        CHECK(writer.bytes.string == bytes_out);
     }
 };
 void test_length_definite(string const& section, string_view bytes, size_t length) {
@@ -82,12 +78,10 @@ TEST_CASE("Read BER::Length", "[BER::Length]") {
 TEST_CASE("Write BER::Element", "[BER::Element]") {
 
     SECTION("Simple Integer") {
-        auto stream = ostringstream();
-        auto writer = BER::make_writer(Bytes::StreamWriter{stream});
+        auto writer = BER::make_writer(Bytes::StringWriter());
         writer.write_integer(int32_t(0xdeadbeef));
-        auto string = stream.str();
 
-        CHECK(string == "\x02\x04\xDE\xAD\xBE\xEF"sv);
+        CHECK(writer.bytes.string == "\x02\x04\xDE\xAD\xBE\xEF"sv);
     }
 
 }
@@ -134,12 +128,10 @@ TEST_CASE("Build BER::UniversalElement", "[BER::UniversalElement]") {
         }
 
         SECTION("Build a null BER element") {
-            auto stream = ostringstream();
-            auto writer = BER::make_writer(Bytes::StreamWriter{stream});
+            auto writer = BER::make_writer(Bytes::StringWriter());
             writer.write_null();
-            auto string = stream.str();
 
-            CHECK(string == "\x05\x00"sv);
+            CHECK(writer.bytes.string == "\x05\x00"sv);
         }
     }
 
@@ -161,24 +153,20 @@ TEST_CASE("Build BER::UniversalElement", "[BER::UniversalElement]") {
         }
 
         SECTION("Build a boolean BER element") {
-            auto stream = ostringstream();
-            auto writer = BER::make_writer(Bytes::StreamWriter{stream});
+            auto writer = BER::make_writer(Bytes::StringWriter());
             writer.write_boolean(true);
-            auto string = stream.str();
 
-            CHECK(string == "\x01\x01\xff"sv);
+            CHECK(writer.bytes.string == "\x01\x01\xff"sv);
         }
     }
 
     SECTION("Integers") {
         auto check_length = [](int32_t value, int length) {
-            auto stream = ostringstream();
-            auto writer = BER::make_writer(Bytes::StreamWriter{stream});
+            auto writer = BER::make_writer(Bytes::StringWriter());
             writer.write_integer(value);
-            auto bytes = stream.str();
-            CHECK(bytes.size() == 2 + length);
+            CHECK(writer.bytes.string.size() == 2 + length);
 
-            auto reader = BER::make_reader(Bytes::StringViewReader{bytes});
+            auto reader = BER::make_reader(Bytes::StringViewReader{writer.bytes.string});
             auto read = TRY(reader.template read_integer<int32_t>());
             CHECK(read == value);
             CHECK(reader.bytes.empty());
@@ -204,13 +192,11 @@ TEST_CASE("Build BER::UniversalElement", "[BER::UniversalElement]") {
 
         auto check_bytes = [](int32_t value, string_view bytes_expected) {
             SECTION(to_string(value)) {
-                auto stream = ostringstream();
-                auto writer = BER::make_writer(Bytes::StreamWriter{stream});
+                auto writer = BER::make_writer(Bytes::StringWriter());
                 writer.write_integer(value);
-                auto bytes = stream.str();
-                CHECK(string_view(bytes) == bytes_expected);
+                CHECK(writer.bytes.string == bytes_expected);
 
-                auto reader = BER::make_reader(Bytes::StringViewReader{bytes});
+                auto reader = BER::make_reader(Bytes::StringViewReader{writer.bytes.string});
                 auto read = TRY(reader.template read_integer<int32_t>());
                 CHECK(read == value);
                 CHECK(reader.bytes.empty());
@@ -237,4 +223,5 @@ TEST_CASE("Build BER::UniversalElement", "[BER::UniversalElement]") {
         CHECK(sequence.bytes.empty());
         CHECK(reader.bytes.empty());
     }
+
 };

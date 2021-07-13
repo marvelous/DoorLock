@@ -14,6 +14,7 @@
 // https://ldap.com/ldapv3-wire-protocol-reference-asn1-ber/
 
 #include "bytes.hpp"
+#include <limits>
 
 namespace BER
 {
@@ -219,6 +220,7 @@ namespace BER
 
     template<typename Bytes>
     struct Writer {
+
         Bytes bytes;
 
         void write_identifier(Identifier const& identifier) {
@@ -278,6 +280,39 @@ namespace BER
             }
             bytes.write(value & 0b11111111);
         }
+
+        struct Sequence {
+
+            Bytes& bytes;
+            size_t index;
+
+            void write(uint8_t byte) {
+                bytes.write(byte);
+            }
+
+            void write(std::string_view bytes) {
+                this->bytes.write(bytes);
+            }
+
+            ~Sequence() {
+                // TODO: handle multi-byte length
+                bytes.string[index] = bytes.string.size() - index;
+            }
+
+        };
+        Writer<Sequence> write_sequence() {
+            write_identifier(Identifier{TagClass::Universal, Encoding::Constructed, TagNumber::Sequence});
+            auto index = bytes.string.size();
+            write_length(Length(std::numeric_limits<std::int8_t>::max()));
+            return Writer<Sequence>{bytes, index};
+        }
+
+        void write_octet_string(const Identifier& identifier, std::string_view dn) {
+            write_identifier(identifier);
+            write_length(Length(dn.size()));
+            bytes.write(dn);
+        }
+
     };
 
     template<typename Bytes>

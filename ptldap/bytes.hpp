@@ -50,4 +50,18 @@ namespace Bytes {
 
     };
 
+    struct StringWriter {
+
+        std::string string;
+
+        void write(uint8_t byte) {
+            string.push_back(char(byte));
+        }
+
+        void write(std::string_view bytes) {
+            string += bytes;
+        }
+
+    };
+
 }

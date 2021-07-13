@@ -57,6 +57,7 @@ namespace LDAP
 
         std::optional<DelRequest> read_del_request() {
             OPT_REQUIRE(is_tag_number(TagNumber::DelRequest));
+            OPT_REQUIRE(identifier.encoding == BER::Encoding::Primitive);
             auto dn = OPT_TRY(ber.read_octet_string(identifier));
             return DelRequest{dn};
         }
@@ -95,6 +96,36 @@ namespace LDAP
     template<typename BERReader>
     auto make_reader(BERReader ber) {
         return Reader<BERReader>{std::move(ber)};
+    }
+
+    template<typename BERWriter>
+    struct MessageWriter {
+
+        BERWriter ber;
+
+        void write_del_request(const DelRequest& request) {
+            auto identifier = BER::Identifier{BER::TagClass::Application, BER::Encoding::Primitive, size_t(TagNumber::DelRequest)};
+            ber.write_octet_string(identifier, request.dn);
+        }
+
+    };
+
+    template<typename BERWriter>
+    struct Writer {
+
+        BERWriter ber;
+
+        auto write_message(int32_t message_id) {
+            auto sequence = ber.write_sequence();
+            sequence.write_integer(message_id);
+            return MessageWriter<typename BERWriter::Sequence>{sequence};
+        }
+
+    };
+
+    template<typename BERWriter>
+    auto make_writer(BERWriter ber) {
+        return Writer<BERWriter>{std::move(ber)};
     }
 
 }
