@@ -18,6 +18,18 @@
 
 namespace BER {
 
+    enum TagClass {
+        Universal = 0b00,
+        Application = 0b01,
+        ContextSpecific = 0b10,
+        Private = 0b11,
+    };
+
+    enum Encoding {
+        Primitive = 0b0,
+        Constructed = 0b1,
+    };
+
     enum TagNumber {
         Boolean = 0x01,
         Integer = 0x02,
@@ -34,18 +46,6 @@ namespace BER {
         IA5String = 0x16,
         UTCTime = 0x17,
         ExtendedType = 0x1F,
-    };
-
-    enum Encoding {
-        Primitive = 0b0,
-        Constructed = 0b1,
-    };
-
-    enum TagClass {
-        Universal = 0b00,
-        Application = 0b01,
-        ContextSpecific = 0b10,
-        Private = 0b11,
     };
 
     struct Identifier {
@@ -314,8 +314,8 @@ namespace BER {
         }
 
         template<typename Datas>
-        void write_sequence_container(Datas const& datas) {
-            write_identifier(Identifier{TagClass::Universal, Encoding::Constructed, TagNumber::Sequence});
+        void write_sequence_container(Identifier const& identifier, Datas const& datas) {
+            write_identifier(identifier);
             auto counter = Writer<BytesCounter>{BytesCounter()};
             counter.write_datas_container(datas);
             write_length(Length(counter.bytes.count));
@@ -330,8 +330,7 @@ namespace BER {
         }
 
         void write_octet_string(std::string_view string) {
-            //TODO
-            write_octet_string(Identifier{}, string);
+            write_octet_string(Identifier{TagClass::Universal, Encoding::Primitive, TagNumber::OctetString}, string);
         }
 
         void write_octet_string(Identifier const& identifier, std::string_view string) {
@@ -341,6 +340,11 @@ namespace BER {
         }
 
     };
+
+    template<typename Writer>
+    void write_data(Writer& writer, bool b) {
+        writer.write_boolean(b);
+    }
 
     template<typename Writer, typename Integer>
     std::enable_if_t<std::is_integral<Integer>::value> write_data(Writer& writer, Integer integer) {

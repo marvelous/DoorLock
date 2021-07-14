@@ -9,6 +9,7 @@
 namespace LDAP {
 
     enum class TagNumber {
+        Controls = 0,
         DelRequest = 10,
     };
 
@@ -43,6 +44,10 @@ namespace LDAP {
 
     };
 
+    TagNumber tag_number(BER::Identifier const& identifier) {
+        return static_cast<TagNumber>(identifier.tag_number);
+    }
+
     template<typename BERReader>
     struct MessageReader {
 
@@ -50,12 +55,8 @@ namespace LDAP {
         BER::Identifier identifier;
         BERReader ber;
 
-        bool is_tag_number(TagNumber tag_number) {
-            return identifier.tag_number == BER::TagNumber(tag_number);
-        }
-
         std::optional<DelRequest> read_del_request() {
-            OPT_REQUIRE(is_tag_number(TagNumber::DelRequest));
+            OPT_REQUIRE(tag_number(identifier) == TagNumber::DelRequest);
             OPT_REQUIRE(identifier.encoding == BER::Encoding::Primitive);
             auto dn = OPT_TRY(ber.read_octet_string(identifier));
             return DelRequest{dn};
@@ -65,7 +66,7 @@ namespace LDAP {
             auto identifier = OPT_TRY(ber.read_identifier());
             OPT_REQUIRE(identifier.tag_class == BER::TagClass::ContextSpecific);
             OPT_REQUIRE(identifier.encoding == BER::Encoding::Constructed);
-            OPT_REQUIRE(identifier.tag_number == 0);
+            OPT_REQUIRE(tag_number(identifier) == TagNumber::Controls);
 
             auto sequence = OPT_TRY(ber.read_sequence(identifier));
             return ControlsReader<BERReader>{std::move(sequence)};
@@ -119,8 +120,8 @@ namespace LDAP {
         return Writer<BERWriter>{std::move(ber)};
     }
 
-    BER::Identifier protocol_op_identifier(TagNumber tag_number) {
-        return {BER::TagClass::Application, BER::Encoding::Primitive, static_cast<BER::TagNumber>(tag_number)};
+    BER::Identifier identifier(BER::TagClass tag_class, BER::Encoding encoding, TagNumber tag_number) {
+        return {tag_class, encoding, static_cast<BER::TagNumber>(tag_number)};
     }
 
 }
@@ -129,12 +130,12 @@ namespace BER {
 
     template<typename Writer>
     void write_data(Writer& writer, LDAP::DelRequest const& request) {
-        writer.write_octet_string(LDAP::protocol_op_identifier(LDAP::TagNumber::DelRequest), request.dn);
+        writer.write_octet_string(LDAP::identifier(BER::TagClass::Application, BER::Encoding::Primitive, LDAP::TagNumber::DelRequest), request.dn);
     }
 
     template<typename Writer>
     void write_data(Writer& writer, std::initializer_list<LDAP::Control> const& controls) {
-        writer.write_sequence_container(controls);
+        writer.write_sequence_container(LDAP::identifier(BER::TagClass::ContextSpecific, BER::Encoding::Constructed, LDAP::TagNumber::Controls), controls);
     }
 
     template<typename Writer>

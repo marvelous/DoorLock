@@ -14,7 +14,7 @@ TEST_CASE("Parse LDAP::DelRequest") {
 
     auto message = TRY(reader.read_message());
     CHECK(message.message_id == 0x05);
-    CHECK(message.is_tag_number(LDAP::TagNumber::DelRequest));
+    CHECK(LDAP::tag_number(message.identifier) == LDAP::TagNumber::DelRequest);
 
     auto del_request = TRY(message.read_del_request());
     CHECK(del_request.dn == "dc=example,dc=com"sv);
@@ -31,11 +31,6 @@ TEST_CASE("Parse LDAP::DelRequest") {
 
     auto writer = LDAP::make_writer(BER::make_writer(Bytes::StringWriter()));
     writer.write_message(0x05, LDAP::DelRequest{"dc=example,dc=com"sv}, LDAP::Control{"1.2.840.113556.1.4.805"sv, true});
-
-    printf("%zu %zu\n", writer.ber.bytes.string.size(), bytes.size());
-    for (auto i = 0; i < std::min(writer.ber.bytes.string.size(), bytes.size()); ++i) {
-        printf("%02x %02x\n", writer.ber.bytes.string[i], bytes[i]);
-    }
     CHECK(writer.ber.bytes.string == bytes);
 
 };
