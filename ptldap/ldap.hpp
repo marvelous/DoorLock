@@ -5,16 +5,34 @@
 // https://ldap.com/ldapv3-wire-protocol-reference/
 
 #include "ber.hpp"
+#include <variant>
 
 namespace LDAP {
 
     enum class TagNumber {
         Controls = 0,
+        BindRequest = 0,
         DelRequest = 10,
+    };
+
+    enum class AuthenticationChoice {
+        Simple = 0,
+        Sasl = 3,
     };
 
     struct DelRequest {
         std::string_view dn;
+    };
+
+    struct BindRequest {
+        uint8_t version;
+        std::string_view name;
+        struct Simple {
+            std::string_view password;
+        };
+        // only simple authentication is supported
+        using Authentication = std::variant<Simple>;
+        Authentication authentication;
     };
 
     struct Control {
@@ -44,6 +62,7 @@ namespace LDAP {
 
     };
 
+    template<typename TagNumber = LDAP::TagNumber>
     TagNumber tag_number(BER::Identifier const& identifier) {
         return static_cast<TagNumber>(identifier.tag_number);
     }
@@ -54,6 +73,23 @@ namespace LDAP {
         int32_t message_id;
         BER::Identifier identifier;
         BERReader ber;
+
+        std::optional<BindRequest> read_bind_request() {
+            OPT_REQUIRE(tag_number(identifier) == TagNumber::BindRequest);
+            OPT_REQUIRE(identifier.encoding == BER::Encoding::Constructed);
+
+            auto sequence = OPT_TRY(ber.read_sequence(identifier));
+            auto version = OPT_TRY(sequence.template read_integer<uint8_t>());
+            auto name = OPT_TRY(sequence.read_octet_string());
+            auto auth_choice = OPT_TRY(sequence.read_identifier());
+
+            OPT_REQUIRE(auth_choice.tag_class == BER::TagClass::ContextSpecific);
+            OPT_REQUIRE(auth_choice.encoding == BER::Encoding::Primitive);
+            OPT_REQUIRE(tag_number<AuthenticationChoice>(auth_choice) == AuthenticationChoice::Simple);
+            auto password = OPT_TRY(sequence.read_octet_string(auth_choice));
+
+            return BindRequest{version, name, BindRequest::Simple{password}};
+        }
 
         std::optional<DelRequest> read_del_request() {
             OPT_REQUIRE(tag_number(identifier) == TagNumber::DelRequest);

@@ -296,7 +296,12 @@ namespace BER {
 
         template<typename ... Datas>
         void write_sequence(Datas const& ... datas) {
-            write_identifier(Identifier{TagClass::Universal, Encoding::Constructed, TagNumber::Sequence});
+            write_sequence(Identifier{TagClass::Universal, Encoding::Constructed, TagNumber::Sequence}, datas...);
+        }
+
+        template<typename ... Datas>
+        void write_sequence(Identifier const& identifier, Datas const& ... datas) {
+            write_identifier(identifier);
             auto counter = Writer<BytesCounter>{BytesCounter()};
             counter.write_datas(datas...);
             write_length(Length(counter.bytes.count));
