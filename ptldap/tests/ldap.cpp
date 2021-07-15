@@ -56,4 +56,8 @@ TEST_CASE("LDAP::BindRequest") {
     CHECK(message.ber.bytes.empty());
     CHECK(reader.ber.bytes.empty());
 
+    auto writer = LDAP::make_writer(BER::make_writer(Bytes::StringWriter()));
+    writer.write_message(0x05, LDAP::BindRequest{3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::BindRequest::Simple{"secret123"sv}});
+    CHECK(writer.ber.bytes.string == bytes);
+
 };

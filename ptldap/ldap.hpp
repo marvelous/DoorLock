@@ -165,6 +165,23 @@ namespace LDAP {
 namespace BER {
 
     template<typename Writer>
+    void write_data(Writer& writer, LDAP::BindRequest const& request) {
+        writer.write_sequence(LDAP::identifier(BER::TagClass::Application, BER::Encoding::Constructed, LDAP::TagNumber::BindRequest), request.version, request.name, request.authentication);
+    }
+
+    template<typename Writer>
+    void write_data(Writer& writer, LDAP::BindRequest::Authentication const& authentication) {
+        std::visit([](auto&& arg) {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (false){//std::is_same_v<T, LDAP::BindRequest::Simple>) {
+            } else {
+                static_assert(always_false_v<T>, "non-exhaustive visitor!");
+            }
+        });
+        writer.write_sequence(LDAP::identifier(BER::TagClass::Application, BER::Encoding::Constructed, LDAP::TagNumber::BindRequest), request.version, request.name, request.authentication);
+    }
+
+    template<typename Writer>
     void write_data(Writer& writer, LDAP::DelRequest const& request) {
         writer.write_octet_string(LDAP::identifier(BER::TagClass::Application, BER::Encoding::Primitive, LDAP::TagNumber::DelRequest), request.dn);
     }
