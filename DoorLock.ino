@@ -1,5 +1,4 @@
-#include "ber.hpp"
-uint8_t LDAP::MsgBuilder::id = 1;
+#include "ptldap/ldap.hpp"
 
 #include <sstream>
 #include <ESP8266WiFi.h>
@@ -98,8 +97,8 @@ void loop() {
 
   // Save the badge NUID into a string
   Serial.print("Badge NUID: ");
-  string badgenuidstr;
-  ostringstream badgenuidss;
+  std::string badgenuidstr;
+  std::ostringstream badgenuidss;
   for (char i = 0; i < mfrc522.uid.size; i++) {
     if (mfrc522.uid.uidByte[i] < 0x10) {
       Serial.print('0');
@@ -199,7 +198,7 @@ void loop() {
   }
 
   // TODO: properly check if an user is found
-  string res;
+  std::string res;
   Serial.println("<SearchResponse");
   while (client.available()) {
     char ch = static_cast<char>(client.read());
