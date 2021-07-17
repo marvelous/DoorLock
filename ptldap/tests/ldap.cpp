@@ -15,7 +15,7 @@ TEST_CASE("LDAP::DelRequest") {
 
     auto message = TRY(reader.read_message());
     CHECK(message.message_id == 0x05);
-    CHECK(LDAP::tag_number(message.identifier) == LDAP::TagNumber::DelRequest);
+    CHECK(message.identifier.is_tag_number(LDAP::TagNumber::DelRequest));
 
     auto del_request = TRY(message.read_del_request());
     CHECK(del_request.dn == "dc=example,dc=com"sv);
@@ -44,20 +44,21 @@ TEST_CASE("LDAP::BindRequest") {
 
     auto message = TRY(reader.read_message());
     CHECK(message.message_id == 0x01);
-    CHECK(LDAP::tag_number(message.identifier) == LDAP::TagNumber::BindRequest);
+    CHECK(message.identifier.is_tag_number(LDAP::TagNumber::BindRequest));
 
     auto bind_request = TRY(message.read_bind_request());
     CHECK(bind_request.version == 3);
     CHECK(bind_request.name == "uid=jdoe,ou=People,dc=example,dc=com"sv);
 
-    auto authentication = TRY(std::get_if<LDAP::BindRequest::Simple>(&bind_request.authentication));
-    CHECK(authentication.password == "secret123"sv);
+    auto password = TRY(bind_request.read_simple());
+    CHECK(password == "secret123"sv);
 
+    CHECK(bind_request.ber.bytes.empty());
     CHECK(message.ber.bytes.empty());
     CHECK(reader.ber.bytes.empty());
 
     auto writer = LDAP::make_writer(BER::make_writer(Bytes::StringWriter()));
-    writer.write_message(0x05, LDAP::BindRequest{3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::BindRequest::Simple{"secret123"sv}});
+    writer.write_message(0x01, LDAP::BindRequest<LDAP::Authentication::Simple>{3, "uid=jdoe,ou=People,dc=example,dc=com"sv, {"secret123"sv}});
     CHECK(writer.ber.bytes.string == bytes);
 
 };

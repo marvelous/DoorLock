@@ -49,9 +49,21 @@ namespace BER {
     };
 
     struct Identifier {
+
         TagClass tag_class;
         Encoding encoding;
         size_t tag_number;
+
+        template<typename TagNumber>
+        Identifier(TagClass tag_class, Encoding encoding, TagNumber tag_number):
+                tag_class(tag_class), encoding(encoding), tag_number(size_t(tag_number)) {
+        }
+
+        template<typename TagNumber>
+        bool is_tag_number(TagNumber tag_number) {
+            return this->tag_number == size_t(tag_number);
+        }
+
     };
 
     enum LengthForm {
@@ -100,7 +112,7 @@ namespace BER {
                     tag_number = (tag_number << 7) | ((byte & 0b01111111) >> 0);
                 } while ((byte & 0b10000000) >> 7);
             }
-            return Identifier{tag_class, encoding, tag_number};
+            return Identifier(tag_class, encoding, tag_number);
         }
 
         std::optional<Length> read_length() {
@@ -131,7 +143,7 @@ namespace BER {
             auto identifier = OPT_TRY(read_identifier());
             OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
             OPT_REQUIRE(identifier.encoding == Encoding::Primitive);
-            OPT_REQUIRE(identifier.tag_number == TagNumber::Integer);
+            OPT_REQUIRE(identifier.is_tag_number(TagNumber::Integer));
 
             auto length = OPT_TRY(read_length()).length;
             OPT_REQUIRE(length > 0);
@@ -156,7 +168,7 @@ namespace BER {
             auto identifier = OPT_TRY(read_identifier());
             OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
             OPT_REQUIRE(identifier.encoding == Encoding::Primitive);
-            OPT_REQUIRE(identifier.tag_number == TagNumber::Null);
+            OPT_REQUIRE(identifier.is_tag_number(TagNumber::Null));
 
             auto length = OPT_TRY(read_length());
             OPT_REQUIRE(length.length == 0);
@@ -168,7 +180,7 @@ namespace BER {
             auto identifier = OPT_TRY(read_identifier());
             OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
             OPT_REQUIRE(identifier.encoding == Encoding::Primitive);
-            OPT_REQUIRE(identifier.tag_number == TagNumber::Boolean);
+            OPT_REQUIRE(identifier.is_tag_number(TagNumber::Boolean));
 
             auto length = OPT_TRY(read_length());
             OPT_REQUIRE(length.length == 1);
@@ -179,8 +191,7 @@ namespace BER {
         std::optional<nonstd::string_view> read_octet_string() {
             auto identifier = OPT_TRY(read_identifier());
             OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
-            OPT_REQUIRE(identifier.encoding == Encoding::Primitive);
-            OPT_REQUIRE(identifier.tag_number == TagNumber::OctetString);
+            OPT_REQUIRE(identifier.is_tag_number(TagNumber::OctetString));
 
             return read_octet_string(identifier);
         }
@@ -197,13 +208,14 @@ namespace BER {
         std::optional<Reader<Bytes>> read_sequence() {
             auto identifier = OPT_TRY(read_identifier());
             OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
-            OPT_REQUIRE(identifier.encoding == Encoding::Constructed);
-            OPT_REQUIRE(identifier.tag_number == TagNumber::Sequence);
+            OPT_REQUIRE(identifier.is_tag_number(TagNumber::Sequence));
 
             return read_sequence(identifier);
         }
 
         std::optional<Reader<Bytes>> read_sequence(Identifier const& identifier) {
+            OPT_REQUIRE(identifier.encoding == Encoding::Constructed);
+
             auto length = OPT_TRY(read_length());
             OPT_REQUIRE(!length.is_indefinite());
 
@@ -272,19 +284,19 @@ namespace BER {
         }
 
         void write_null() {
-            write_identifier(Identifier{TagClass::Universal, Encoding::Primitive, TagNumber::Null});
+            write_identifier(Identifier(TagClass::Universal, Encoding::Primitive, TagNumber::Null));
             write_length(Length(0));
         }
 
         void write_boolean(bool value, uint8_t true_byte = 0xff) {
-            write_identifier(Identifier{TagClass::Universal, Encoding::Primitive, TagNumber::Boolean});
+            write_identifier(Identifier(TagClass::Universal, Encoding::Primitive, TagNumber::Boolean));
             write_length(Length(1));
             bytes.write(value ? true_byte : 0x00);
         }
 
         template<typename T>
         void write_integer(T value) {
-            write_identifier(Identifier{TagClass::Universal, Encoding::Primitive, TagNumber::Integer});
+            write_identifier(Identifier(TagClass::Universal, Encoding::Primitive, TagNumber::Integer));
 
             auto shifts = count_bits(value) / 8;
             write_length(Length(shifts + 1));
@@ -296,7 +308,7 @@ namespace BER {
 
         template<typename ... Datas>
         void write_sequence(Datas const& ... datas) {
-            write_sequence(Identifier{TagClass::Universal, Encoding::Constructed, TagNumber::Sequence}, datas...);
+            write_sequence(Identifier(TagClass::Universal, Encoding::Constructed, TagNumber::Sequence), datas...);
         }
 
         template<typename ... Datas>
@@ -335,7 +347,7 @@ namespace BER {
         }
 
         void write_octet_string(std::string_view string) {
-            write_octet_string(Identifier{TagClass::Universal, Encoding::Primitive, TagNumber::OctetString}, string);
+            write_octet_string(Identifier(TagClass::Universal, Encoding::Primitive, TagNumber::OctetString), string);
         }
 
         void write_octet_string(Identifier const& identifier, std::string_view string) {
