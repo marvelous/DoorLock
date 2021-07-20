@@ -10,10 +10,10 @@ using namespace std;
 
 TEST_CASE("Read BER::Identifier", "[BER::Identifier]") {
 
-    auto test_identifier = [](string const& section, string_view bytes, BER::TagClass tag_class, BER::Encoding encoding, size_t tag_number) {
+    auto test_identifier = [](string const& section, string_view bytes, BER::TagClass tag_class, BER::Encoding encoding, BER::TagNumber tag_number) {
         SECTION(section) {
             auto reader = BER::make_reader(Bytes::StringViewReader{bytes});
-            auto read = TRY(reader.read_identifier());
+            auto read = TRY(reader.template read_identifier<BER::TagNumber>());
 
             CHECK(read.tag_class == tag_class);
             CHECK(read.encoding == encoding);
@@ -29,7 +29,7 @@ TEST_CASE("Read BER::Identifier", "[BER::Identifier]") {
 
     test_identifier("simple", "\x02"sv, BER::TagClass::Universal, BER::Encoding::Primitive, BER::TagNumber::Integer);
     test_identifier("constructed", "\x30"sv, BER::TagClass::Universal, BER::Encoding::Constructed, BER::TagNumber::Sequence);
-    test_identifier("application", "\x7f\xde\xad\x42"sv, BER::TagClass::Application, BER::Encoding::Constructed, 0x1796c2);
+    test_identifier("application", "\x7f\xde\xad\x42"sv, BER::TagClass::Application, BER::Encoding::Constructed, BER::TagNumber(0x1796c2));
 
 }
 

@@ -15,7 +15,7 @@ TEST_CASE("LDAP::DelRequest") {
 
     auto message = TRY(reader.read_message());
     CHECK(message.message_id == 0x05);
-    CHECK(message.identifier.is_tag_number(LDAP::TagNumber::DelRequest));
+    CHECK(message.identifier.tag_number == LDAP::TagNumber::DelRequest);
 
     auto del_request = TRY(message.read_del_request());
     CHECK(del_request.dn == "dc=example,dc=com"sv);
@@ -44,11 +44,12 @@ TEST_CASE("LDAP::BindRequest") {
 
     auto message = TRY(reader.read_message());
     CHECK(message.message_id == 0x01);
-    CHECK(message.identifier.is_tag_number(LDAP::TagNumber::BindRequest));
+    CHECK(message.identifier.tag_number == LDAP::TagNumber::BindRequest);
 
     auto bind_request = TRY(message.read_bind_request());
     CHECK(bind_request.version == 3);
     CHECK(bind_request.name == "uid=jdoe,ou=People,dc=example,dc=com"sv);
+    CHECK(bind_request.identifier.tag_number == LDAP::Authentication::TagNumber::Simple);
 
     auto password = TRY(bind_request.read_simple());
     CHECK(password == "secret123"sv);

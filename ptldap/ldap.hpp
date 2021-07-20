@@ -14,11 +14,6 @@ namespace LDAP {
         DelRequest = 10,
     };
 
-    enum class AuthenticationChoice {
-        Simple = 0,
-        Sasl = 3,
-    };
-
     struct DelRequest {
         std::string_view dn;
     };
@@ -29,10 +24,18 @@ namespace LDAP {
         std::string_view name;
         Authentication authentication;
     };
+
     namespace Authentication {
+
+        enum class TagNumber {
+            Simple = 0,
+            Sasl = 3,
+        };
+
         struct Simple {
             std::string_view password;
         };
+
     }
 
     struct Control {
@@ -46,11 +49,11 @@ namespace LDAP {
 
         uint8_t version;
         std::string_view name;
-        BER::Identifier identifier;
+        BER::Identifier<Authentication::TagNumber> identifier;
         BERReader ber;
 
         std::optional<std::string_view> read_simple() {
-            OPT_REQUIRE(identifier.is_tag_number(AuthenticationChoice::Simple));
+            OPT_REQUIRE(identifier.tag_number == Authentication::TagNumber::Simple);
             return OPT_TRY(ber.read_octet_string(identifier));
         }
 
@@ -81,30 +84,30 @@ namespace LDAP {
     struct MessageReader {
 
         int32_t message_id;
-        BER::Identifier identifier;
+        BER::Identifier<TagNumber> identifier;
         BERReader ber;
 
         std::optional<BindRequestReader<BERReader>> read_bind_request() {
-            OPT_REQUIRE(identifier.is_tag_number(TagNumber::BindRequest));
+            OPT_REQUIRE(identifier.tag_number == TagNumber::BindRequest);
 
             auto sequence = OPT_TRY(ber.read_sequence(identifier));
             auto version = OPT_TRY(sequence.template read_integer<uint8_t>());
             auto name = OPT_TRY(sequence.read_octet_string());
-            auto auth_choice = OPT_TRY(sequence.read_identifier());
+            auto auth_choice = OPT_TRY(sequence.template read_identifier<Authentication::TagNumber>());
             OPT_REQUIRE(auth_choice.tag_class == BER::TagClass::ContextSpecific);
             return BindRequestReader<BERReader>{version, name, auth_choice, std::move(sequence)};
         }
 
         std::optional<DelRequest> read_del_request() {
-            OPT_REQUIRE(identifier.is_tag_number(TagNumber::DelRequest));
+            OPT_REQUIRE(identifier.tag_number == TagNumber::DelRequest);
             auto dn = OPT_TRY(ber.read_octet_string(identifier));
             return DelRequest{dn};
         }
 
         std::optional<ControlsReader<BERReader>> read_controls() {
-            auto identifier = OPT_TRY(ber.read_identifier());
+            auto identifier = OPT_TRY(ber.template read_identifier<TagNumber>());
             OPT_REQUIRE(identifier.tag_class == BER::TagClass::ContextSpecific);
-            OPT_REQUIRE(identifier.is_tag_number(TagNumber::Controls));
+            OPT_REQUIRE(identifier.tag_number == TagNumber::Controls);
 
             auto sequence = OPT_TRY(ber.read_sequence(identifier));
             return ControlsReader<BERReader>{std::move(sequence)};
@@ -123,7 +126,7 @@ namespace LDAP {
             auto message_id = OPT_TRY(sequence.template read_integer<int32_t>());
             OPT_REQUIRE(message_id >= 0);
 
-            auto identifier = OPT_TRY(sequence.read_identifier());
+            auto identifier = OPT_TRY(sequence.template read_identifier<TagNumber>());
             OPT_REQUIRE(identifier.tag_class == BER::TagClass::Application);
 
             return MessageReader<BERReader>{message_id, identifier, std::move(sequence)};
@@ -164,22 +167,22 @@ namespace BER {
 
     template<typename Writer, typename Authentication>
     void write_data(Writer& writer, LDAP::BindRequest<Authentication> const& request) {
-        writer.write_sequence(Identifier(TagClass::Application, Encoding::Constructed, LDAP::TagNumber::BindRequest), request.version, request.name, request.authentication);
+        writer.write_sequence(BER::make_identifier(TagClass::Application, Encoding::Constructed, LDAP::TagNumber::BindRequest), request.version, request.name, request.authentication);
     }
 
     template<typename Writer>
     void write_data(Writer& writer, LDAP::Authentication::Simple const& authentication) {
-        writer.write_octet_string(Identifier(TagClass::ContextSpecific, Encoding::Primitive, LDAP::AuthenticationChoice::Simple), authentication.password);
+        writer.write_octet_string(BER::make_identifier(TagClass::ContextSpecific, Encoding::Primitive, LDAP::Authentication::TagNumber::Simple), authentication.password);
     }
 
     template<typename Writer>
     void write_data(Writer& writer, LDAP::DelRequest const& request) {
-        writer.write_octet_string(Identifier(TagClass::Application, Encoding::Primitive, LDAP::TagNumber::DelRequest), request.dn);
+        writer.write_octet_string(BER::make_identifier(TagClass::Application, Encoding::Primitive, LDAP::TagNumber::DelRequest), request.dn);
     }
 
     template<typename Writer>
     void write_data(Writer& writer, std::initializer_list<LDAP::Control> const& controls) {
-        writer.write_sequence_container(Identifier(TagClass::ContextSpecific, Encoding::Constructed, LDAP::TagNumber::Controls), controls);
+        writer.write_sequence_container(BER::make_identifier(TagClass::ContextSpecific, Encoding::Constructed, LDAP::TagNumber::Controls), controls);
     }
 
     template<typename Writer>
