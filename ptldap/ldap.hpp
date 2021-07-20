@@ -15,9 +15,9 @@ namespace LDAP {
         DelRequest = 10,
     };
 
-    struct DelRequest {
-        std::string_view dn;
-    };
+    // struct DelRequest {
+    //     std::string_view dn;
+    // };
 
     template<typename Authentication>
     struct BindRequest {
@@ -77,11 +77,19 @@ namespace LDAP {
         std::initializer_list<std::string_view> attributes;
     };
 
-    struct Control {
-        std::string_view control_type;
-        bool criticality;
-        std::optional<std::string_view> control_value;
-    };
+    // struct Control {
+    //     std::string_view control_type;
+    //     bool criticality;
+    //     std::optional<std::string_view> control_value;
+    // };
+
+    using MessageID = BER::Integer<uint32_t>;
+    using DelRequest = BER::OctetString;
+    using ProtocolOp = BER::Choice<TagNumber, DelRequest>;
+    using LDAPOID = BER::OctetString;
+    using Control = BER::Sequence<LDAPOID, BER::Boolean, BER::Optional<BER::OctetString>>;
+    using Controls = BER::SequenceOf<Control>;
+    using Message = BER::Sequence<MessageID, ProtocolOp, BER::Optional<Controls>>;
 
     template<typename BERReader>
     struct BindRequestReader {
@@ -103,19 +111,19 @@ namespace LDAP {
 
         BERReader ber;
 
-        std::optional<Control> read_control() {
-            auto sequence = OPT_TRY(ber.read_sequence());
-            auto control_type = OPT_TRY(sequence.read_octet_string());
-            auto criticality = OPT_TRY(sequence.read_boolean());
+        // std::optional<Control> read_control() {
+        //     auto sequence = OPT_TRY(ber.read_sequence());
+        //     auto control_type = OPT_TRY(sequence.read_octet_string());
+        //     auto criticality = OPT_TRY(sequence.read_boolean());
 
-            if (sequence.bytes.empty()) {
-                return Control{control_type, criticality, std::nullopt};
-            }
-            auto control_value = OPT_TRY(sequence.read_octet_string());
+        //     if (sequence.bytes.empty()) {
+        //         return Control{control_type, criticality, std::nullopt};
+        //     }
+        //     auto control_value = OPT_TRY(sequence.read_octet_string());
 
-            OPT_REQUIRE(sequence.bytes.empty());
-            return Control{control_type, criticality, control_value};
-        }
+        //     OPT_REQUIRE(sequence.bytes.empty());
+        //     return Control{control_type, criticality, control_value};
+        // }
 
     };
 
@@ -208,10 +216,10 @@ namespace BER {
         writer.write_octet_string(BER::Identifier(TagClass::ContextSpecific, Encoding::Primitive, LDAP::Authentication::TagNumber::Simple), authentication.password);
     }
 
-    template<typename Writer>
-    void write_data(Writer& writer, LDAP::DelRequest const& request) {
-        writer.write_octet_string(BER::Identifier(TagClass::Application, Encoding::Primitive, LDAP::TagNumber::DelRequest), request.dn);
-    }
+    // template<typename Writer>
+    // void write_data(Writer& writer, LDAP::DelRequest const& request) {
+    //     writer.write_octet_string(BER::Identifier(TagClass::Application, Encoding::Primitive, LDAP::TagNumber::DelRequest), request.dn);
+    // }
 
     template<typename Writer, typename Filter>
     void write_data(Writer& writer, LDAP::SearchRequest<Filter> const& request) {
@@ -224,13 +232,13 @@ namespace BER {
         writer.write_sequence_container(BER::Identifier(TagClass::ContextSpecific, Encoding::Constructed, LDAP::TagNumber::Controls), controls);
     }
 
-    template<typename Writer>
-    void write_data(Writer& writer, LDAP::Control const& control) {
-        if (control.control_value) {
-            writer.write_sequence(control.control_type, control.criticality, *control.control_value);
-        } else {
-            writer.write_sequence(control.control_type, control.criticality);
-        }
-    }
+    // template<typename Writer>
+    // void write_data(Writer& writer, LDAP::Control const& control) {
+    //     if (control.control_value) {
+    //         writer.write_sequence(control.control_type, control.criticality, *control.control_value);
+    //     } else {
+    //         writer.write_sequence(control.control_type, control.criticality);
+    //     }
+    // }
 
 }

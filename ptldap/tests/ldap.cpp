@@ -13,25 +13,26 @@ TEST_CASE("LDAP::DelRequest") {
     auto bytes = "\x30\x35\x02\x01\x05\x4a\x11\x64\x63\x3d\x65\x78\x61\x6d\x70\x6c\x65\x2c\x64\x63\x3d\x63\x6f\x6d\xa0\x1d\x30\x1b\x04\x16\x31\x2e\x32\x2e\x38\x34\x30\x2e\x31\x31\x33\x35\x35\x36\x2e\x31\x2e\x34\x2e\x38\x30\x35\x01\x01\xff"sv;
     auto reader = BER::Reader(Bytes::StringViewReader{bytes});
 
-    auto [message_id, protocol_op, controls] = TRY(reader.read<LDAP::Message>());
+    auto [message_id, protocol_op, controls_opt] = TRY(reader.read<LDAP::Message>());
     CHECK(message_id == 0x05);
     CHECK(protocol_op.tag_number == LDAP::TagNumber::DelRequest);
 
-    auto del_request = TRY(protocol_op.read<LDAP::DelRequest>());
+    auto del_request = TRY(protocol_op.template read<LDAP::DelRequest>());
     CHECK(del_request == "dc=example,dc=com"sv);
 
-    auto control = TRY(controls.read<LDAP::Control>());
-    CHECK(control.control_type == "1.2.840.113556.1.4.805"sv);
-    CHECK(control.criticality == true);
-    CHECK(control.control_value == nullopt);
+    auto controls = TRY(controls_opt);
+    auto [control_type, criticality, control_value] = TRY(controls.read());
+    CHECK(control_type == "1.2.840.113556.1.4.805"sv);
+    CHECK(criticality == true);
+    CHECK(control_value == nullopt);
 
-    CHECK(controls.ber.bytes.empty());
-    CHECK(message.ber.bytes.empty());
-    CHECK(reader.ber.bytes.empty());
+    // CHECK(controls.bytes.empty());
+    // CHECK(message.bytes.empty());
+    // CHECK(reader.bytes.empty());
 
     auto writer = BER::Writer(Bytes::StringWriter());
-    writer.write(LDAP::Message(0x05, LDAP::DelRequest("dc=example,dc=com"sv), {LDAP::Control("1.2.840.113556.1.4.805"sv, true)}));
-    CHECK(writer.ber.bytes.string == bytes);
+    LDAP::Message(0x05, LDAP::ProtocolOp(LDAP::DelRequest("dc=example,dc=com"sv)), LDAP::Controls{LDAP::Control("1.2.840.113556.1.4.805"sv, true, std::nullopt)}).write(writer);
+    CHECK(writer.bytes.string == bytes);
 
 };
 

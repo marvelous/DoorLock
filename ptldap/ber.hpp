@@ -14,7 +14,7 @@
 // https://ldap.com/ldapv3-wire-protocol-reference-asn1-ber/
 
 #include "bytes.hpp"
-#include <limits>
+#include <variant>
 
 namespace BER {
 
@@ -93,13 +93,13 @@ namespace BER {
         explicit Length(): length(SIZE_MAX) {}
     };
 
-    template<typename Value>
-    struct Integer {
+    // template<typename Value>
+    // struct Integer {
 
-        Value value;
-        Integer(Value value): value(value) {}
+    //     Value value;
+    //     Integer(Value value): value(value) {}
 
-    };
+    // };
 
     template<typename T>
     uint8_t count_bits(T value) {
@@ -112,6 +112,72 @@ namespace BER {
         }
         return bits;
     }
+
+    template<typename Value>
+    struct Integer {
+        using Read = Value;
+
+        Integer(Value) {}
+    };
+    struct Boolean {
+        using Read = bool;
+
+        Boolean(bool) {}
+    };
+    struct OctetString {
+        using Read = std::string_view;
+
+        OctetString(std::string_view) {}
+    };
+
+    template<typename Value>
+    struct Optional {
+        using Read = std::optional<typename Value::Read>;
+
+        Optional(Value) {}
+        Optional(std::nullopt_t) {}
+    };
+
+    template<typename ... Elements>
+    struct Sequence {
+        template<typename Element>
+        using Read1 = typename Element::Read;
+        using Read = std::tuple<Read1<Elements>...>;
+
+        Sequence(Elements ... elements) {}
+
+        template<typename Writer>
+        void write(Writer& writer) {}
+    };
+
+    template<typename T>
+    struct SequenceOf {
+        struct Read {
+            std::optional<typename T::Read> read() {
+                return std::nullopt;
+            }
+        };
+
+        SequenceOf(std::initializer_list<T>) {}
+    };
+
+    template<typename TagNumber, typename ... Choices>
+    struct Choice {
+
+        struct Read {
+
+            TagNumber tag_number;
+
+            template<typename T>
+            std::optional<typename T::Read> read() {
+                return std::nullopt;
+            }
+
+        };
+
+        Choice(std::variant<Choices...>) {}
+
+    };
 
     template<typename Bytes>
     struct Reader {
@@ -186,6 +252,11 @@ namespace BER {
                 value |= byte;
             }
             return value;
+        }
+
+        template<typename T>
+        std::optional<typename T::Read> read() {
+            return std::nullopt;
         }
 
         std::optional<nullptr_t> read_null() {
