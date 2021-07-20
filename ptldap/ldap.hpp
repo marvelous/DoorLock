@@ -11,6 +11,7 @@ namespace LDAP {
     enum class TagNumber {
         Controls = 0,
         BindRequest = 0,
+        SearchRequest = 3,
         DelRequest = 10,
     };
 
@@ -37,6 +38,44 @@ namespace LDAP {
         };
 
     }
+
+    namespace Filter {
+
+        template<typename ... Filters>
+        auto and_(Filters ... filters) {
+            return 0;
+        }
+
+        auto equalityMatch(std::string_view attributeDesc, std::string_view assertionValue) {
+            return 0;
+        }
+
+    }
+
+    enum class Scope {
+        BaseObject = 0x0,
+        SingleLevel = 0x1,
+        WholeSubtree = 0x2,
+    };
+
+    enum class DerefAliases {
+        NeverDerefAliases = 0x0,
+        DerefInSearching = 0x1,
+        DerefFindingBaseObj = 0x2,
+        DerefAlways = 0x3,
+    };
+
+    template<typename Filter>
+    struct SearchRequest {
+        std::string_view base_object;
+        Scope scope;
+        DerefAliases deref_aliases;
+        size_t size_limit;
+        size_t time_limit;
+        bool types_only;
+        Filter filter;
+        std::initializer_list<std::string_view> attributes;
+    };
 
     struct Control {
         std::string_view control_type;
@@ -120,6 +159,8 @@ namespace LDAP {
 
         BERReader ber;
 
+        Reader(BERReader ber): ber(std::move(ber)) {}
+
         std::optional<MessageReader<BERReader>> read_message() {
             auto sequence = OPT_TRY(ber.read_sequence());
 
@@ -134,15 +175,12 @@ namespace LDAP {
 
     };
 
-    template<typename BERReader>
-    auto make_reader(BERReader ber) {
-        return Reader<BERReader>{std::move(ber)};
-    }
-
     template<typename BERWriter>
     struct Writer {
 
         BERWriter ber;
+
+        Writer(BERWriter ber): ber(std::move(ber)) {}
 
         template<typename ProtocolOp>
         void write_message(int32_t message_id, ProtocolOp const& protocol_op) {
@@ -156,33 +194,34 @@ namespace LDAP {
 
     };
 
-    template<typename BERWriter>
-    auto make_writer(BERWriter ber) {
-        return Writer<BERWriter>{std::move(ber)};
-    }
-
 }
 
 namespace BER {
 
     template<typename Writer, typename Authentication>
     void write_data(Writer& writer, LDAP::BindRequest<Authentication> const& request) {
-        writer.write_sequence(BER::make_identifier(TagClass::Application, Encoding::Constructed, LDAP::TagNumber::BindRequest), request.version, request.name, request.authentication);
+        writer.write_sequence(BER::Identifier(TagClass::Application, Encoding::Constructed, LDAP::TagNumber::BindRequest), request.version, request.name, request.authentication);
     }
 
     template<typename Writer>
     void write_data(Writer& writer, LDAP::Authentication::Simple const& authentication) {
-        writer.write_octet_string(BER::make_identifier(TagClass::ContextSpecific, Encoding::Primitive, LDAP::Authentication::TagNumber::Simple), authentication.password);
+        writer.write_octet_string(BER::Identifier(TagClass::ContextSpecific, Encoding::Primitive, LDAP::Authentication::TagNumber::Simple), authentication.password);
     }
 
     template<typename Writer>
     void write_data(Writer& writer, LDAP::DelRequest const& request) {
-        writer.write_octet_string(BER::make_identifier(TagClass::Application, Encoding::Primitive, LDAP::TagNumber::DelRequest), request.dn);
+        writer.write_octet_string(BER::Identifier(TagClass::Application, Encoding::Primitive, LDAP::TagNumber::DelRequest), request.dn);
+    }
+
+    template<typename Writer, typename Filter>
+    void write_data(Writer& writer, LDAP::SearchRequest<Filter> const& request) {
+        writer.write_sequence(BER::Identifier(TagClass::Application, Encoding::Constructed, LDAP::TagNumber::SearchRequest),
+            request.base_object, request.scope, request.deref_aliases, request.size_limit, request.time_limit, request.types_only, request.filter, request.attributes);
     }
 
     template<typename Writer>
     void write_data(Writer& writer, std::initializer_list<LDAP::Control> const& controls) {
-        writer.write_sequence_container(BER::make_identifier(TagClass::ContextSpecific, Encoding::Constructed, LDAP::TagNumber::Controls), controls);
+        writer.write_sequence_container(BER::Identifier(TagClass::ContextSpecific, Encoding::Constructed, LDAP::TagNumber::Controls), controls);
     }
 
     template<typename Writer>

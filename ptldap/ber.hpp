@@ -18,6 +18,15 @@
 
 namespace BER {
 
+    auto to_int = [](auto value) {
+        using T = decltype(value);
+        if constexpr (std::is_enum_v<T>) {
+            return std::underlying_type_t<T>(value);
+        } else {
+            return value;
+        }
+    };
+
     enum class TagClass {
         Universal = 0b00,
         Application = 0b01,
@@ -37,6 +46,7 @@ namespace BER {
         OctetString = 0x04,
         Null = 0x05,
         ObjectIdentifier = 0x06,
+        Enumerated = 0x0a,
         Sequence = 0x10,
         SequenceOf = 0x10,
         Set = 0x11,
@@ -46,19 +56,26 @@ namespace BER {
         IA5String = 0x16,
         UTCTime = 0x17,
     };
-    const auto extended_type = std::underlying_type_t<TagNumber>(0x1F);
+    const auto extended_type = to_int(TagNumber(0x1F));
 
     template<typename TagNumber>
     struct Identifier {
+
         TagClass tag_class;
         Encoding encoding;
         TagNumber tag_number;
+
+        Identifier(TagClass tag_class, Encoding encoding, TagNumber tag_number):
+                tag_class(tag_class), encoding(encoding), tag_number(tag_number) {}
+
     };
 
     template<typename TagNumber>
-    Identifier<TagNumber> make_identifier(TagClass tag_class, Encoding encoding, TagNumber tag_number) {
-        return {tag_class, encoding, tag_number};
-    }
+    struct Tag {
+        TagClass tag_class;
+        TagNumber tag_number;
+        Tag(TagClass tag_class, TagNumber tag_number): tag_class(tag_class), tag_number(tag_number) {}
+    };
 
     enum class LengthForm {
         Short = 0b0,
@@ -74,6 +91,14 @@ namespace BER {
         }
         explicit Length(size_t length): length(length) {}
         explicit Length(): length(SIZE_MAX) {}
+    };
+
+    template<typename Value>
+    struct Integer {
+
+        Value value;
+        Integer(Value value): value(value) {}
+
     };
 
     template<typename T>
@@ -93,6 +118,8 @@ namespace BER {
 
         Bytes bytes;
 
+        Reader(Bytes bytes): bytes(std::move(bytes)) {}
+
         template<typename TagNumber>
         std::optional<Identifier<TagNumber>> read_identifier() {
             auto byte = OPT_TRY(bytes.read());
@@ -101,7 +128,7 @@ namespace BER {
             auto tag_number = TagNumber((byte & 0b00011111) >> 0);
 
             if (tag_number == TagNumber(extended_type)) {
-                auto tag_number_int = std::underlying_type_t<TagNumber>(0);
+                auto tag_number_int = to_int(TagNumber(0));
                 do {
                     byte = OPT_TRY(bytes.read());
                     tag_number_int = (tag_number_int << 7) | ((byte & 0b01111111) >> 0);
@@ -109,7 +136,7 @@ namespace BER {
                 tag_number = TagNumber(tag_number_int);
             }
 
-            return make_identifier(tag_class, encoding, tag_number);
+            return Identifier(tag_class, encoding, tag_number);
         }
 
         std::optional<Length> read_length() {
@@ -146,7 +173,7 @@ namespace BER {
             OPT_REQUIRE(length > 0);
 
             auto first = int8_t(OPT_TRY(bytes.read()));
-            if (std::is_unsigned<T>::value && first == 0) {
+            if (std::is_unsigned_v<T> && first == 0) {
                 OPT_REQUIRE(length - 1 <= sizeof(T));
             } else {
                 OPT_REQUIRE(length <= sizeof(T));
@@ -158,7 +185,7 @@ namespace BER {
                 value <<= 8;
                 value |= byte;
             }
-            return std::move(value);
+            return value;
         }
 
         std::optional<nullptr_t> read_null() {
@@ -223,11 +250,6 @@ namespace BER {
 
     };
 
-    template<typename Bytes>
-    auto make_reader(Bytes bytes) {
-        return Reader<Bytes>{std::move(bytes)};
-    }
-
     struct BytesCounter {
 
         size_t count = 0;
@@ -247,15 +269,22 @@ namespace BER {
 
         Bytes bytes;
 
+        Writer(Bytes bytes): bytes(std::move(bytes)) {}
+
+        template<typename TagNumber>
+        void write_primitive(Tag<TagNumber> tag) {
+            write_identifier(Identifier(tag.tag_class, Encoding::Primitive, tag.tag_number));
+        }
+
         template<typename TagNumber>
         void write_identifier(Identifier<TagNumber> const& identifier) {
-            auto tag_class = std::underlying_type_t<TagClass>(identifier.tag_class);
-            auto encoding = std::underlying_type_t<Encoding>(identifier.encoding);
+            auto tag_class = to_int(identifier.tag_class);
+            auto encoding = to_int(identifier.encoding);
             auto write_identifier = [&](auto tag_number) {
                 bytes.write((tag_class << 6) | (encoding << 5) | (tag_number << 0));
             };
 
-            auto tag_number = std::underlying_type_t<TagNumber>(identifier.tag_number);
+            auto tag_number = to_int(identifier.tag_number);
             if (tag_number < extended_type) {
                 write_identifier(tag_number);
                 return;
@@ -271,7 +300,7 @@ namespace BER {
 
         void write_length(Length const& length) {
             auto write_length = [&](LengthForm length_form, uint8_t length) {
-                bytes.write((uint8_t(length_form) << 7) | (length << 0));
+                bytes.write((to_int(length_form) << 7) | (length << 0));
             };
 
             if (length.is_indefinite()) {
@@ -294,20 +323,37 @@ namespace BER {
             bytes.write(count & 0b11111111);
         }
 
-        void write_null() {
-            write_identifier(make_identifier(TagClass::Universal, Encoding::Primitive, TagNumber::Null));
+        void write(nullptr_t value) {
+            write_primitive(Tag(TagClass::Universal, TagNumber::Null));
             write_length(Length(0));
         }
 
+        template<typename Integer>
+        std::enable_if_t<std::is_integral_v<Integer>> write(Integer value) {
+            write_primitive(Tag(TagClass::Universal, TagNumber::Integer));
+
+            auto shifts = count_bits(value) / 8;
+            write_length(Length(shifts + 1));
+            for (auto shift = shifts * 8; shift; shift -= 8) {
+                bytes.write((value >> shift) & 0b11111111);
+            }
+            bytes.write(value & 0b11111111);
+        }
+
         void write_boolean(bool value, uint8_t true_byte = 0xff) {
-            write_identifier(make_identifier(TagClass::Universal, Encoding::Primitive, TagNumber::Boolean));
+            write_identifier(Identifier(TagClass::Universal, Encoding::Primitive, TagNumber::Boolean));
             write_length(Length(1));
             bytes.write(value ? true_byte : 0x00);
         }
 
         template<typename T>
         void write_integer(T value) {
-            write_identifier(make_identifier(TagClass::Universal, Encoding::Primitive, TagNumber::Integer));
+            write_integer(Identifier(TagClass::Universal, Encoding::Primitive, TagNumber::Integer), value);
+        }
+
+        template<typename TagNumber, typename T>
+        void write_integer(Identifier<TagNumber> const& identifier, T value) {
+            write_identifier(identifier);
 
             auto shifts = count_bits(value) / 8;
             write_length(Length(shifts + 1));
@@ -319,7 +365,7 @@ namespace BER {
 
         template<typename ... Datas>
         void write_sequence(Datas const& ... datas) {
-            write_sequence(make_identifier(TagClass::Universal, Encoding::Constructed, TagNumber::Sequence), datas...);
+            write_sequence(Identifier(TagClass::Universal, Encoding::Constructed, TagNumber::Sequence), datas...);
         }
 
         template<typename TagNumber, typename ... Datas>
@@ -358,7 +404,7 @@ namespace BER {
         }
 
         void write_octet_string(std::string_view string) {
-            write_octet_string(make_identifier(TagClass::Universal, Encoding::Primitive, TagNumber::OctetString), string);
+            write_octet_string(Identifier(TagClass::Universal, Encoding::Primitive, TagNumber::OctetString), string);
         }
 
         template<typename TagNumber>
@@ -376,8 +422,13 @@ namespace BER {
     }
 
     template<typename Writer, typename Integer>
-    std::enable_if_t<std::is_integral<Integer>::value> write_data(Writer& writer, Integer integer) {
+    std::enable_if_t<std::is_integral_v<Integer>> write_data(Writer& writer, Integer integer) {
         writer.write_integer(integer);
+    }
+
+    template<typename Writer, typename Enumerated>
+    std::enable_if_t<std::is_enum_v<Enumerated>> write_data(Writer& writer, Enumerated enumerated) {
+        writer.write_integer(Identifier(TagClass::Universal, Encoding::Primitive, TagNumber::Enumerated), std::underlying_type_t<Enumerated>(enumerated));
     }
 
     template<typename Writer>
@@ -385,9 +436,9 @@ namespace BER {
         writer.write_octet_string(string);
     }
 
-    template<typename Bytes>
-    auto make_writer(Bytes bytes) {
-        return Writer<Bytes>{std::move(bytes)};
+    template<typename Writer, typename Element>
+    void write_data(Writer& writer, std::initializer_list<Element> const& elements) {
+        writer.write_sequence_container(Identifier(TagClass::Universal, Encoding::Constructed, TagNumber::Sequence), elements);
     }
 
 }
