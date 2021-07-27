@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.12)
 project(ptldap_tests)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 include_directories(../)
 
 file(GLOB LIB_SRC_FILES "ber.cpp")
 set_property(SOURCE ${LIB_SRC_FILES} PROPERTY COMPILE_FLAGS -std=c++17)
-SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fno-exceptions")
+SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fno-exceptions -fconcepts-ts")
 
 add_executable(ber_tests
     test_main.cpp
@@ -18,3 +18,7 @@ add_executable(ldap_tests
         test_main.cpp
         ldap.cpp
 )
+
+enable_testing()
+add_test(ber_tests ber_tests)
+add_test(ldap_tests ldap_tests)

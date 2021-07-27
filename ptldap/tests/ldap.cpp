@@ -7,62 +7,55 @@
 
 using namespace std;
 
-TEST_CASE("LDAP::DelRequest") {
+// TEST_CASE("LDAP::DelRequest") {
 
-    // From https://ldap.com/ldapv3-wire-protocol-reference-ldap-message/
-    auto bytes = "\x30\x35\x02\x01\x05\x4a\x11\x64\x63\x3d\x65\x78\x61\x6d\x70\x6c\x65\x2c\x64\x63\x3d\x63\x6f\x6d\xa0\x1d\x30\x1b\x04\x16\x31\x2e\x32\x2e\x38\x34\x30\x2e\x31\x31\x33\x35\x35\x36\x2e\x31\x2e\x34\x2e\x38\x30\x35\x01\x01\xff"sv;
-    auto reader = BER::Reader(Bytes::StringViewReader{bytes});
+//     // From https://ldap.com/ldapv3-wire-protocol-reference-ldap-message/
+//     auto bytes = "\x30\x35\x02\x01\x05\x4a\x11\x64\x63\x3d\x65\x78\x61\x6d\x70\x6c\x65\x2c\x64\x63\x3d\x63\x6f\x6d\xa0\x1d\x30\x1b\x04\x16\x31\x2e\x32\x2e\x38\x34\x30\x2e\x31\x31\x33\x35\x35\x36\x2e\x31\x2e\x34\x2e\x38\x30\x35\x01\x01\xff"sv;
 
-    auto [message_id, protocol_op, controls_opt] = TRY(reader.read<LDAP::Message>());
-    CHECK(message_id == 0x05);
-    CHECK(protocol_op.tag_number == LDAP::TagNumber::DelRequest);
+//     auto writer = BER::Writer(Bytes::StringWriter());
+//     LDAP::Message(0x05, LDAP::ProtocolOp(LDAP::DelRequest("dc=example,dc=com"sv)), LDAP::Controls{LDAP::Control("1.2.840.113556.1.4.805"sv, true, std::nullopt)}).write(writer);
+//     CHECK(writer.bytes.string == bytes);
 
-    auto del_request = TRY(protocol_op.template read<LDAP::DelRequest>());
-    CHECK(del_request == "dc=example,dc=com"sv);
+//     auto reader = BER::Reader(Bytes::StringViewReader{bytes});
 
-    auto controls = TRY(controls_opt);
-    auto [control_type, criticality, control_value] = TRY(controls.read());
-    CHECK(control_type == "1.2.840.113556.1.4.805"sv);
-    CHECK(criticality == true);
-    CHECK(control_value == nullopt);
+//     auto [message_id, protocol_op, controls_opt] = TRY(reader.read<LDAP::Message>());
+//     CHECK(message_id == 0x05);
+//     CHECK(protocol_op.tag_number == LDAP::TagNumber::DelRequest);
 
-    // CHECK(controls.bytes.empty());
-    // CHECK(message.bytes.empty());
-    // CHECK(reader.bytes.empty());
+//     auto del_request = TRY(protocol_op.template read<LDAP::DelRequest>());
+//     CHECK(del_request == "dc=example,dc=com"sv);
+
+//     auto controls = TRY(controls_opt);
+//     auto [control_type, criticality, control_value] = TRY(controls.read());
+//     CHECK(control_type == "1.2.840.113556.1.4.805"sv);
+//     CHECK(criticality == true);
+//     CHECK(control_value == nullopt);
+
+//     // CHECK(controls.bytes.empty());
+//     // CHECK(message.bytes.empty());
+//     // CHECK(reader.bytes.empty());
+
+// };
+
+TEST_CASE("LDAP::BindRequest") {
+
+    // https://ldap.com/ldapv3-wire-protocol-reference-bind/
+    auto bytes = "\x30\x39\x02\x01\x01\x60\x34\x02\x01\x03\x04\x24\x75\x69\x64\x3d\x6a\x64\x6f\x65\x2c\x6f\x75\x3d\x50\x65\x6f\x70\x6c\x65\x2c\x64\x63\x3d\x65\x78\x61\x6d\x70\x6c\x65\x2c\x64\x63\x3d\x63\x6f\x6d\x80\x09\x73\x65\x63\x72\x65\x74\x31\x32\x33"sv;
 
     auto writer = BER::Writer(Bytes::StringWriter());
-    LDAP::Message(0x05, LDAP::ProtocolOp(LDAP::DelRequest("dc=example,dc=com"sv)), LDAP::Controls{LDAP::Control("1.2.840.113556.1.4.805"sv, true, std::nullopt)}).write(writer);
+    // writer.write(LDAP::message_id(42));
+    // writer.write(LDAP::authentication_choice_simple("secret123"sv));
+    // LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice_simple("secret123"sv));
+    // LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice_simple("secret123"sv)), std::nullopt);
+    // LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt);
+    writer.write(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt));
+    LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt));
+    // writer.write(LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt)));
+    // LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice_simple("secret123"sv)), LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt)));
+    // writer.write(LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice_simple("secret123"sv)), LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt))));
     CHECK(writer.bytes.string == bytes);
 
 };
-
-// TEST_CASE("LDAP::BindRequest") {
-
-//     // https://ldap.com/ldapv3-wire-protocol-reference-bind/
-//     auto bytes = "\x30\x39\x02\x01\x01\x60\x34\x02\x01\x03\x04\x24\x75\x69\x64\x3d\x6a\x64\x6f\x65\x2c\x6f\x75\x3d\x50\x65\x6f\x70\x6c\x65\x2c\x64\x63\x3d\x65\x78\x61\x6d\x70\x6c\x65\x2c\x64\x63\x3d\x63\x6f\x6d\x80\x09\x73\x65\x63\x72\x65\x74\x31\x32\x33"sv;
-//     auto reader = LDAP::Reader(BER::Reader(Bytes::StringViewReader{bytes}));
-
-//     auto message = TRY(reader.read_message());
-//     CHECK(message.message_id == 0x01);
-//     CHECK(message.identifier.tag_number == LDAP::TagNumber::BindRequest);
-
-//     auto bind_request = TRY(message.read_bind_request());
-//     CHECK(bind_request.version == 3);
-//     CHECK(bind_request.name == "uid=jdoe,ou=People,dc=example,dc=com"sv);
-//     CHECK(bind_request.identifier.tag_number == LDAP::Authentication::TagNumber::Simple);
-
-//     auto password = TRY(bind_request.read_simple());
-//     CHECK(password == "secret123"sv);
-
-//     CHECK(bind_request.ber.bytes.empty());
-//     CHECK(message.ber.bytes.empty());
-//     CHECK(reader.ber.bytes.empty());
-
-//     auto writer = LDAP::Writer(BER::Writer(Bytes::StringWriter()));
-//     writer.write_message(0x01, LDAP::BindRequest<LDAP::Authentication::Simple>{3, "uid=jdoe,ou=People,dc=example,dc=com"sv, {"secret123"sv}});
-//     CHECK(writer.ber.bytes.string == bytes);
-
-// };
 
 // TEST_CASE("LDAP::SearchRequest") {
 
