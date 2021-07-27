@@ -48,9 +48,9 @@ TEST_CASE("LDAP::BindRequest") {
     // LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice_simple("secret123"sv));
     // LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice_simple("secret123"sv)), std::nullopt);
     // LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt);
-    writer.write(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt));
-    LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt));
-    // writer.write(LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt)));
+    // writer.write(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt));
+    // LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt));
+    writer.write(LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt)));
     // LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice_simple("secret123"sv)), LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt)));
     // writer.write(LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice_simple("secret123"sv)), LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt))));
     CHECK(writer.bytes.string == bytes);

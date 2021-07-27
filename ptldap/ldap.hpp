@@ -25,20 +25,20 @@ namespace LDAP {
     constexpr auto message_id = BER::integer;
 
     constexpr auto ldap_result = BER::sequence(
-        /*BER::enumerated<ResultCode>, */ldapdn, ldap_string, referral.context_specific(3).optional());
+        /*BER::enumerated<ResultCode>, */ldapdn, ldap_string, BER::optional(referral.context_specific(3)));
 
     constexpr auto authentication_choice_simple = BER::octet_string.context_specific(0);
 
     constexpr auto bind_request = BER::sequence(
-        ldapoid, BER::boolean, BER::octet_string.optional());
+        ldapoid, BER::boolean, BER::optional(BER::octet_string));
 
     constexpr auto control = BER::sequence(
-        ldapoid, BER::boolean, BER::octet_string.optional());
+        ldapoid, BER::boolean, BER::optional(BER::octet_string));
 
     constexpr auto controls = BER::sequence_of(control);
 
     constexpr auto message = BER::sequence(
-        message_id, bind_request, controls.optional());
+        message_id, bind_request, BER::optional(controls));
 
     constexpr auto compare_response = ldap_result.application(15);
 
@@ -46,18 +46,18 @@ namespace LDAP {
 
     constexpr auto extended_request = BER::sequence(
         ldapoid.context_specific(0),
-        BER::octet_string.context_specific(1).optional()
+        BER::optional(BER::octet_string.context_specific(1))
     ).application(23);
 
     constexpr auto extended_response = BER::sequence(
         // TODO: COMPONENTS OF LDAPResult,
-        ldapoid.context_specific(10).optional(),
-        BER::octet_string.context_specific(11).optional()
+        BER::optional(ldapoid.context_specific(10)),
+        BER::optional(BER::octet_string.context_specific(11))
     ).application(24);
 
     constexpr auto intermediate_response = BER::sequence(
-        ldapoid.context_specific(0).optional(),
-        BER::octet_string.context_specific(1).optional()
+        BER::optional(ldapoid.context_specific(0)),
+        BER::optional(BER::octet_string.context_specific(1))
     ).application(25);
 
     // enum class TagNumber {

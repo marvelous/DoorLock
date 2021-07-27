@@ -7,7 +7,7 @@ include_directories(../)
 
 file(GLOB LIB_SRC_FILES "ber.cpp")
 set_property(SOURCE ${LIB_SRC_FILES} PROPERTY COMPILE_FLAGS -std=c++17)
-SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fno-exceptions -fconcepts-ts")
+SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fno-exceptions -fconcepts")
 
 add_executable(ber_tests
     test_main.cpp

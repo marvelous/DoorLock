@@ -263,8 +263,7 @@ namespace BER {
             return length == SIZE_MAX;
         }
 
-        template<typename Writer>
-        void write(Writer& writer) const {
+        void write(auto& writer) const {
             auto write_length = [&](LengthForm length_form, uint8_t length) {
                 writer.bytes.write((to_int(length_form) << 7) | (length << 0));
             };
@@ -358,24 +357,7 @@ namespace BER {
             value(std::forward<decltype(value)>(value)) {}
 
         void write(auto& output) const {
-            auto tag_class = to_int(type.tag_class);
-            auto encoding = to_int(type.encoding);
-            auto tag_number = to_int(type.tag_number);
-
-            auto write0 = [&](auto tag_number) {
-                output.bytes.write((tag_class << 6) | (encoding << 5) | (tag_number << 0));
-            };
-            if (tag_number < extended_type) {
-                write0(tag_number);
-            } else {
-                write0(extended_type);
-                auto shifts = (count_bits(tag_number) - 1) / 7;
-                for (auto shift = shifts * 7; shift; shift -= 7) {
-                    output.bytes.write(0b10000000 | (tag_number >> shift) & 0b01111111);
-                }
-                output.bytes.write(0b00000000 | (tag_number & 0b01111111));
-            }
-
+            type.identifier_write(output);
             type.writer.write(output, value);
         }
 
@@ -396,23 +378,42 @@ namespace BER {
             tag_number(std::forward<decltype(tag_number)>(tag_number)),
             writer(std::forward<decltype(writer)>(writer)) {}
 
-        constexpr auto context_specific(auto tag_number) const {
-            using Result = Type<encoding, TagClass::ContextSpecific, decltype(tag_number), Writer>;
+        template<TagClass tag_class>
+        constexpr auto tagged(auto tag_number) const {
+            using Result = Type<encoding, tag_class, decltype(tag_number), Writer>;
             return Result(std::forward<decltype(tag_number)>(tag_number), writer);
+        }
+
+        constexpr auto context_specific(auto tag_number) const {
+            return tagged<TagClass::ContextSpecific>(tag_number);
         }
 
         constexpr auto application(auto tag_number) const {
-            using Result = Type<encoding, TagClass::Application, decltype(tag_number), Writer>;
-            return Result(std::forward<decltype(tag_number)>(tag_number), writer);
-        }
-
-        constexpr auto optional() const {
-            // TODO
-            return *this;
+            return tagged<TagClass::Application>(tag_number);
         }
 
         constexpr auto operator()(auto&&... args) const {
             return BER::Writable(*this, writer(std::forward<decltype(args)>(args)...));
+        }
+
+        void identifier_write(auto& output) const {
+            auto tag_class = to_int(this->tag_class);
+            auto encoding = to_int(this->encoding);
+            auto tag_number = to_int(this->tag_number);
+
+            auto write0 = [&](auto tag_number) {
+                output.bytes.write((tag_class << 6) | (encoding << 5) | (tag_number << 0));
+            };
+            if (tag_number < extended_type) {
+                write0(tag_number);
+            } else {
+                write0(extended_type);
+                auto shifts = (count_bits(tag_number) - 1) / 7;
+                for (auto shift = shifts * 7; shift; shift -= 7) {
+                    output.bytes.write(0b10000000 | (tag_number >> shift) & 0b01111111);
+                }
+                output.bytes.write(0b00000000 | (tag_number & 0b01111111));
+            }
         }
 
         // null
@@ -497,12 +498,12 @@ namespace BER {
         explicit constexpr Sequence(auto&&... types):
             types(std::forward<decltype(types)>(types)...) {}
 
-        template<typename X, size_t ...i>
-        auto for_each() {}
+        template<size_t ... indices>
+        constexpr auto transform(auto&& tuple, std::index_sequence<indices...>) const {
+            return std::tuple(std::get<indices>(types)(std::get<indices>(std::forward<decltype(tuple)>(tuple)))...);
+        }
         auto operator()(auto&&... args) const {
-            // template<size_t ...i>
-            std::index_sequence_for<decltype(args)...>{};
-            return std::tuple(std::forward<decltype(args)>(args)...);
+            return transform(std::tuple(std::forward<decltype(args)>(args)...), std::index_sequence_for<decltype(args)...>{});
         }
 
         void write(auto& writer, auto const& value) const {
@@ -514,7 +515,7 @@ namespace BER {
 
         void write_elements(auto& writer, auto const& elements) const {
             // TODO
-            // std::apply([&](auto&&... args){ (writer.write(args), ...); }, elements);
+            std::apply([&](auto&&... args){ (writer.write(args), ...); }, elements);
         }
 
     };
@@ -551,6 +552,50 @@ namespace BER {
     constexpr auto sequence_of(auto&& type) {
         return universal_type<Encoding::Constructed>(Universal::SequenceOf,
             SequenceOf<std::decay_t<decltype(type)>>(std::forward<decltype(type)>(type)));
+    }
+
+    template<typename Type>
+    struct Optional {
+
+        Type type;
+        explicit constexpr Optional(auto&& type):
+            type(std::forward<decltype(type)>(type)) {}
+
+        template<typename Value>
+        struct Writable {
+
+            Type type;
+            Value value;
+
+            explicit constexpr Writable(Type type, Value value):
+                type(std::forward<decltype(type)>(type)),
+                value(std::forward<decltype(value)>(value)) {}
+
+            void write(auto& output) const {
+                if (value) {
+                    type.identifier_write(output);
+                    type.writer.write(output, *value);
+                }
+            }
+
+        };
+
+        struct Nullopt {
+            void write(auto& output) const {
+            }
+        };
+
+        auto operator()(auto&& value) const {
+            // if constexpr (std::is_same_v<std::decay_t<decltype(value)>, std::nullptr_t>) {
+                return Nullopt{};
+            // } else {
+            //     return Writable(type, std::optional(std::forward<decltype(value)>(value)));
+            // }
+        }
+
+    };
+    constexpr auto optional(auto&& type) {
+        return Optional<std::decay_t<decltype(type)>>(std::forward<decltype(type)>(type));
     }
 
     // template<typename ... Choices>
