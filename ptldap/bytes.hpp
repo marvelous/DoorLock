@@ -12,6 +12,10 @@ namespace Bytes {
 
         std::string_view string;
 
+        size_t size() {
+            return string.size();
+        }
+
         bool empty() {
             return string.empty();
         }
@@ -60,6 +64,20 @@ namespace Bytes {
 
         void write(std::string_view bytes) {
             string += bytes;
+        }
+
+    };
+
+    struct CounterWriter {
+
+        size_t count = 0;
+
+        void write(uint8_t byte) {
+            ++count;
+        }
+
+        void write(std::string_view bytes) {
+            count += bytes.size();
         }
 
     };

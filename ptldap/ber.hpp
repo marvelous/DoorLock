@@ -41,198 +41,6 @@ namespace BER {
         Constructed = 0b1,
     };
 
-    enum class Universal {
-        Boolean = 0x01,
-        Integer = 0x02,
-        BitString = 0x03,
-        OctetString = 0x04,
-        Null = 0x05,
-        ObjectIdentifier = 0x06,
-        Enumerated = 0x0a,
-        Sequence = 0x10,
-        SequenceOf = 0x10,
-        Set = 0x11,
-        SetOf = 0x11,
-        PrintableString = 0x13,
-        T61String = 0x14,
-        IA5String = 0x16,
-        UTCTime = 0x17,
-    };
-    const auto extended_type = to_int(Universal(0x1F));
-
-    template<typename Bytes>
-    struct Reader {
-
-        Bytes bytes;
-
-        explicit Reader(Bytes bytes): bytes(std::move(bytes)) {}
-
-        auto read(auto const& type) {
-            return type.read(*this);
-        }
-
-        // template<typename TagNumber>
-        // std::optional<Identifier<TagNumber>> read_identifier() {
-        //     auto byte = OPT_TRY(bytes.read());
-        //     auto tag_class = TagClass((byte & 0b11000000) >> 6);
-        //     auto encoding = Encoding((byte & 0b00100000) >> 5);
-        //     auto tag_number = TagNumber((byte & 0b00011111) >> 0);
-
-        //     if (tag_number == TagNumber(extended_type)) {
-        //         auto tag_number_int = to_int(TagNumber(0));
-        //         do {
-        //             byte = OPT_TRY(bytes.read());
-        //             tag_number_int = (tag_number_int << 7) | ((byte & 0b01111111) >> 0);
-        //         } while ((byte & 0b10000000) >> 7);
-        //         tag_number = TagNumber(tag_number_int);
-        //     }
-
-        //     return Identifier(tag_class, encoding, tag_number);
-        // }
-
-        // std::optional<Length> read_length() {
-        //     auto byte = OPT_TRY(bytes.read());
-
-        //     auto form = LengthForm((byte & 0b10000000) >> 7);
-        //     if (form == LengthForm::Short) {
-        //         return Length(byte);
-        //     }
-
-        //     auto count = (byte & 0b01111111) >> 0;
-        //     if (count == LengthIndefinite) {
-        //         return Length();
-        //     }
-        //     OPT_REQUIRE(count <= sizeof(size_t));
-
-        //     auto length = size_t{0};
-        //     for (auto i = 0u; i < count; ++i) {
-        //         byte = OPT_TRY(bytes.read());
-        //         length = (length << 8) | byte;
-        //     }
-        //     OPT_REQUIRE(length != SIZE_MAX);
-        //     return Length(length);
-        // }
-
-        // template<typename T>
-        // std::optional<T> read_integer() {
-        //     auto identifier = OPT_TRY(read_identifier<TagNumber>());
-        //     OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
-        //     OPT_REQUIRE(identifier.encoding == Encoding::Primitive);
-        //     OPT_REQUIRE(identifier.tag_number == TagNumber::Integer);
-
-        //     auto length = OPT_TRY(read_length()).length;
-        //     OPT_REQUIRE(length > 0);
-
-        //     auto first = int8_t(OPT_TRY(bytes.read()));
-        //     if (std::is_unsigned_v<T> && first == 0) {
-        //         OPT_REQUIRE(length - 1 <= sizeof(T));
-        //     } else {
-        //         OPT_REQUIRE(length <= sizeof(T));
-        //     }
-
-        //     auto value = T(first);
-        //     for (auto shifts = length - 1; shifts; --shifts) {
-        //         auto byte = OPT_TRY(bytes.read());
-        //         value <<= 8;
-        //         value |= byte;
-        //     }
-        //     return value;
-        // }
-
-        // template<typename T>
-        // std::optional<typename T::Read> read() {
-        //     return std::nullopt;
-        // }
-
-        // std::optional<nullptr_t> read_null() {
-        //     auto identifier = OPT_TRY(read_identifier<TagNumber>());
-        //     OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
-        //     OPT_REQUIRE(identifier.encoding == Encoding::Primitive);
-        //     OPT_REQUIRE(identifier.tag_number == TagNumber::Null);
-
-        //     auto length = OPT_TRY(read_length());
-        //     OPT_REQUIRE(length.length == 0);
-
-        //     return nullptr;
-        // }
-
-        // std::optional<bool> read_boolean() {
-        //     auto identifier = OPT_TRY(read_identifier<TagNumber>());
-        //     OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
-        //     OPT_REQUIRE(identifier.encoding == Encoding::Primitive);
-        //     OPT_REQUIRE(identifier.tag_number == TagNumber::Boolean);
-
-        //     auto length = OPT_TRY(read_length());
-        //     OPT_REQUIRE(length.length == 1);
-
-        //     return OPT_TRY(bytes.read());
-        // }
-
-        // std::optional<nonstd::string_view> read_octet_string() {
-        //     auto identifier = OPT_TRY(read_identifier<TagNumber>());
-        //     OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
-        //     OPT_REQUIRE(identifier.tag_number == TagNumber::OctetString);
-
-        //     return read_octet_string(identifier);
-        // }
-
-        // template<typename TagNumber>
-        // std::optional<nonstd::string_view> read_octet_string(Identifier<TagNumber> const& identifier) {
-        //     OPT_REQUIRE(identifier.encoding == Encoding::Primitive);
-
-        //     auto length = OPT_TRY(read_length());
-        //     OPT_REQUIRE(!length.is_indefinite());
-
-        //     return bytes.read(length.length);
-        // }
-
-        // std::optional<Reader<Bytes>> read_sequence() {
-        //     auto identifier = OPT_TRY(read_identifier<TagNumber>());
-        //     OPT_REQUIRE(identifier.tag_class == TagClass::Universal);
-        //     OPT_REQUIRE(identifier.tag_number == TagNumber::Sequence);
-
-        //     return read_sequence(identifier);
-        // }
-
-        // template<typename TagNumber>
-        // std::optional<Reader<Bytes>> read_sequence(Identifier<TagNumber> const& identifier) {
-        //     OPT_REQUIRE(identifier.encoding == Encoding::Constructed);
-
-        //     auto length = OPT_TRY(read_length());
-        //     OPT_REQUIRE(!length.is_indefinite());
-
-        //     return Reader<Bytes>{OPT_TRY(bytes.reader(length.length))};
-        // }
-
-    };
-
-    struct BytesCounter {
-
-        size_t count = 0;
-
-        void write(uint8_t byte) {
-            ++count;
-        }
-
-        void write(std::string_view bytes) {
-            count += bytes.size();
-        }
-
-    };
-
-    template<typename Bytes>
-    struct Writer {
-
-        Bytes bytes;
-
-        explicit Writer(Bytes bytes): bytes(std::move(bytes)) {}
-
-        void write(auto const& value) {
-            value.write(*this);
-        }
-
-    };
-
     template<typename T>
     uint8_t count_bits(T value) {
         if (value < 0) value = ~value;
@@ -245,14 +53,72 @@ namespace BER {
         return bits;
     }
 
-    enum class LengthForm {
-        Short = 0b0,
-        Long = 0b1,
+    template<typename TagNumber>
+    struct Identifier {
+
+        static constexpr auto extended_type = 0x1F;
+
+        Encoding encoding;
+        TagClass tag_class;
+        TagNumber tag_number;
+
+        explicit constexpr Identifier(Encoding encoding, TagClass tag_class, TagNumber tag_number):
+            encoding(std::forward<decltype(encoding)>(encoding)),
+            tag_class(std::forward<decltype(tag_class)>(tag_class)),
+            tag_number(std::forward<decltype(tag_number)>(tag_number)) {}
+
+        void write(auto& writer) const {
+            auto tag_class = to_int(this->tag_class);
+            auto encoding = to_int(this->encoding);
+            auto tag_number = to_int(this->tag_number);
+
+            auto write0 = [&](auto tag_number) {
+                writer.write((tag_class << 6) | (encoding << 5) | (tag_number << 0));
+            };
+            if (tag_number < extended_type) {
+                write0(tag_number);
+            } else {
+                write0(extended_type);
+                auto shifts = (count_bits(tag_number) - 1) / 7;
+                for (auto shift = shifts * 7; shift; shift -= 7) {
+                    writer.write(0b10000000 | (tag_number >> shift) & 0b01111111);
+                }
+                writer.write(0b00000000 | (tag_number & 0b01111111));
+            }
+        }
+
+        static std::optional<Identifier> read(auto& reader) {
+            auto byte = OPT_TRY(reader.read());
+            auto tag_class = TagClass((byte & 0b11000000) >> 6);
+            auto encoding = Encoding((byte & 0b00100000) >> 5);
+            auto tag_number = TagNumber((byte & 0b00011111) >> 0);
+
+            if (tag_number == TagNumber(extended_type)) {
+                auto tag_number_int = to_int(TagNumber(0));
+                do {
+                    byte = OPT_TRY(reader.read());
+                    tag_number_int = (tag_number_int << 7) | ((byte & 0b01111111) >> 0);
+                } while ((byte & 0b10000000) >> 7);
+                tag_number = TagNumber(std::move(tag_number_int));
+            }
+
+            return Identifier(encoding, tag_class, std::move(tag_number));
+        }
+
+        bool operator==(Identifier const& that) const {
+            return this->encoding == that.encoding && this->tag_class == that.tag_class && this->tag_number == that.tag_number;
+        }
+
     };
 
-    constexpr uint8_t LengthIndefinite = 0b0000000;
-
     struct Length {
+
+        enum class Form {
+            Short = 0b0,
+            Long = 0b1,
+        };
+
+        static constexpr uint8_t Indefinite = 0b0000000;
 
         size_t length;
 
@@ -263,88 +129,55 @@ namespace BER {
             return length == SIZE_MAX;
         }
 
-        void write(auto& writer) const {
-            auto write_length = [&](LengthForm length_form, uint8_t length) {
-                writer.bytes.write((to_int(length_form) << 7) | (length << 0));
+        void write(auto& bytes) const {
+            auto write_length = [&](Form form, uint8_t length) {
+                bytes.write((to_int(form) << 7) | (length << 0));
             };
 
             if (is_indefinite()) {
-                write_length(LengthForm::Long, LengthIndefinite);
+                write_length(Form::Long, Indefinite);
                 return;
             }
 
             auto count = length;
             if (count <= 0b01111111) {
-                write_length(LengthForm::Short, count);
+                write_length(Form::Short, count);
                 return;
             }
 
             auto shifts = (count_bits(count) - 1) / 8;
             auto length_length = shifts + 1;
-            write_length(LengthForm::Long, length_length);
+            write_length(Form::Long, length_length);
             for (auto shift = shifts * 8; shift; shift -= 8) {
-                writer.bytes.write((count >> shift) & 0b11111111);
+                bytes.write((count >> shift) & 0b11111111);
             }
-            writer.bytes.write(count & 0b11111111);
+            bytes.write(count & 0b11111111);
+        }
+
+        static std::optional<Length> read(auto& reader) {
+            auto byte = OPT_TRY(reader.read());
+
+            auto form = Form((byte & 0b10000000) >> 7);
+            if (form == Form::Short) {
+                return Length(byte);
+            }
+
+            auto count = (byte & 0b01111111) >> 0;
+            if (count == Indefinite) {
+                return Length();
+            }
+            OPT_REQUIRE(count <= sizeof(size_t));
+
+            auto length = size_t{0};
+            for (auto i = 0u; i < count; ++i) {
+                byte = OPT_TRY(reader.read());
+                length = (length << 8) | byte;
+            }
+            OPT_REQUIRE(length != SIZE_MAX);
+            return Length(length);
         }
 
     };
-
-    // template<typename ... Elements>
-    // struct Sequence {
-    //     template<typename Element>
-    //     using Read1 = typename Element::Read;
-    //     using Read = std::tuple<Read1<Elements>...>;
-
-    //     std::tuple<Elements...> value;
-
-    //     template<typename ... Args>
-    //     Sequence(Args&&... args): value(std::forward<Args>(args)...) {}
-
-    //     template<typename Writer>
-    //     void write(Writer& writer) const {
-    //         std::apply([&](auto&&... args){ (writer.write(args), ...); }, value);
-    //     }
-
-    // };
-
-    // template<typename Element, size_t size>
-    // struct SequenceOf {
-    //     struct Read {
-    //         std::optional<typename Element::Read> read() {
-    //             return std::nullopt;
-    //         }
-    //     };
-
-    //     std::array<Element, size> value;
-
-    //     template<typename ... Args>
-    //     SequenceOf(Args&&... args): value(std::forward<Args&&>(args)...) {}
-    // };
-
-    // template<typename TagNumber, typename Type>
-    // struct Tagged {
-
-    //     TagClass tag_class;
-    //     TagNumber tag_number;
-    //     Type type;
-
-    //     Tagged(auto&& tag_class, auto&& tag_number, auto&& type):
-    //         tag_class(std::forward<decltype(tag_class)>(tag_class)),
-    //         tag_number(std::forward<decltype(tag_number)>(tag_number)),
-    //         type(std::forward<decltype(type)>(type)) {}
-
-    // };
-    // constexpr auto tag(auto&& tag_class, auto&& tag_number, auto&& type) {
-    //     return Tagged(std::forward<decltype(tag_class)>(tag_class),
-    //         std::forward<decltype(tag_number)>(tag_number),
-    //         std::forward<decltype(type)>(type));
-    // }
-    // constexpr auto tag(auto&& tag_number, auto&& type) {
-    //     return Tagged(TagClass::ContextSpecific,
-    //         std::forward<decltype(tag_number)>(tag_number),
-    //         std::forward<decltype(type)>(type));
-    // }
 
     template<typename Type, typename Value>
     struct Writable {
@@ -356,112 +189,61 @@ namespace BER {
             type(std::forward<decltype(type)>(type)),
             value(std::forward<decltype(value)>(value)) {}
 
-        void write(auto& output) const {
-            type.identifier_write(output);
-            type.writer.write(output, value);
+        void write(auto& writer) const {
+            type.identifier.write(writer);
+
+            auto counter = Bytes::CounterWriter();
+            type.serde.write(counter, value);
+            Length(counter.count).write(writer);
+
+            type.serde.write(writer, value);
         }
 
     };
 
-    template<Encoding e, TagClass c, typename T, typename W>
+    template<typename Identifier, typename Serde>
     struct Type {
 
-        static constexpr auto encoding = e;
-        static constexpr auto tag_class = c;
-        using TagNumber = T;
-        using Writer = W;
+        Identifier identifier;
+        Serde serde;
 
-        TagNumber tag_number;
-        Writer writer;
+        explicit constexpr Type(Identifier identifier, Serde serde):
+            identifier(std::forward<decltype(identifier)>(identifier)),
+            serde(std::forward<decltype(serde)>(serde)) {}
 
-        explicit constexpr Type(TagNumber tag_number, Writer writer):
-            tag_number(std::forward<decltype(tag_number)>(tag_number)),
-            writer(std::forward<decltype(writer)>(writer)) {}
-
-        template<TagClass tag_class>
-        constexpr auto tagged(auto tag_number) const {
-            using Result = Type<encoding, tag_class, decltype(tag_number), Writer>;
-            return Result(std::forward<decltype(tag_number)>(tag_number), writer);
+        constexpr auto tagged(TagClass tag_class, auto tag_number) const {
+            return BER::Type(BER::Identifier(identifier.encoding, tag_class, tag_number), serde);
         }
 
         constexpr auto context_specific(auto tag_number) const {
-            return tagged<TagClass::ContextSpecific>(tag_number);
+            return tagged(TagClass::ContextSpecific, tag_number);
         }
 
         constexpr auto application(auto tag_number) const {
-            return tagged<TagClass::Application>(tag_number);
+            return tagged(TagClass::Application, tag_number);
         }
 
         constexpr auto operator()(auto&&... args) const {
-            return BER::Writable(*this, writer(std::forward<decltype(args)>(args)...));
+            return BER::Writable(*this, serde(std::forward<decltype(args)>(args)...));
         }
 
-        void identifier_write(auto& output) const {
-            auto tag_class = to_int(this->tag_class);
-            auto encoding = to_int(this->encoding);
-            auto tag_number = to_int(this->tag_number);
+        auto read(auto& reader) const -> decltype(serde.read(std::string_view())) {
+            auto identifier = OPT_TRY(Identifier::read(reader));
+            OPT_REQUIRE(identifier == this->identifier);
 
-            auto write0 = [&](auto tag_number) {
-                output.bytes.write((tag_class << 6) | (encoding << 5) | (tag_number << 0));
-            };
-            if (tag_number < extended_type) {
-                write0(tag_number);
-            } else {
-                write0(extended_type);
-                auto shifts = (count_bits(tag_number) - 1) / 7;
-                for (auto shift = shifts * 7; shift; shift -= 7) {
-                    output.bytes.write(0b10000000 | (tag_number >> shift) & 0b01111111);
-                }
-                output.bytes.write(0b00000000 | (tag_number & 0b01111111));
-            }
-        }
+            auto length = OPT_TRY(Length::read(reader));
+            OPT_REQUIRE(!length.is_indefinite());
 
-        // null
-        void write(auto& writer) const {
-            writer.write((*this)());
-        }
-
-        auto read(auto& reader) const {
-
-            return std::optional{0}; // TODO
+            auto bytes = Bytes::StringViewReader{OPT_TRY(reader.read(length.length))};
+            auto value = serde.read(bytes);
+            OPT_REQUIRE(bytes.empty());
+            return value;
         }
 
     };
-    template<Encoding encoding>
-    constexpr auto universal_type(Universal tag_number, auto writer) {
-        return Type<encoding, TagClass::Universal, Universal, decltype(writer)>(tag_number, writer);
+    constexpr auto type(Encoding encoding, auto tag_number, auto serde) {
+        return Type(Identifier(encoding, TagClass::Universal, tag_number), serde);
     }
-
-    struct Null {
-
-        auto operator()() const {
-            return nullptr;
-        }
-
-        void write(auto& writer, auto const& value) const {
-            writer.write(Length(0));
-        }
-
-    };
-    constexpr auto null = universal_type<Encoding::Primitive>(Universal::Null, Null());
-
-    struct Integer {
-
-        auto operator()(auto value) const {
-            return std::move(value);
-        }
-
-        void write(auto& writer, auto const& value) const {
-            auto shifts = count_bits(value) / 8;
-            writer.write(Length(shifts + 1));
-            for (auto shift = shifts * 8; shift; shift -= 8) {
-                writer.bytes.write((value >> shift) & 0b11111111);
-            }
-            writer.bytes.write(value & 0b11111111);
-        }
-
-    };
-    constexpr auto integer = universal_type<Encoding::Primitive>(Universal::Integer, Integer());
 
     struct Boolean {
 
@@ -470,12 +252,52 @@ namespace BER {
         }
 
         void write(auto& writer, bool value) const {
-            writer.write(Length(1));
-            writer.bytes.write(value ? 0xff : 0x00);
+            writer.write(value ? 0xff : 0x00);
+        }
+
+        std::optional<bool> read(auto&& reader) const {
+            return reader.read() != 0x00;
         }
 
     };
-    constexpr auto boolean = universal_type<Encoding::Primitive>(Universal::Boolean, Boolean());
+    constexpr auto boolean = type(Encoding::Primitive, 0x01, Boolean());
+
+    template<typename Integral = int> // TODO
+    struct Integer {
+
+        auto operator()(auto value) const {
+            return std::move(value);
+        }
+
+        void write(auto& writer, auto const& value) const {
+            auto shifts = count_bits(value) / 8;
+            for (auto shift = shifts * 8; shift; shift -= 8) {
+                writer.write((value >> shift) & 0b11111111);
+            }
+            writer.write(value & 0b11111111);
+        }
+
+        std::optional<Integral> read(auto&& reader) const {
+            auto length = reader.size();
+            auto first = int8_t(OPT_TRY(reader.read()));
+
+            if (std::is_unsigned_v<Integral> && first == 0) {
+                OPT_REQUIRE(length - 1 <= sizeof(Integral));
+            } else {
+                OPT_REQUIRE(length <= sizeof(Integral));
+            }
+
+            auto value = Integral(first);
+            for (auto shifts = length - 1; shifts; --shifts) {
+                auto byte = OPT_TRY(reader.read());
+                value <<= 8;
+                value |= byte;
+            }
+            return value;
+        }
+
+    };
+    constexpr auto integer = type(Encoding::Primitive, 2, Integer());
 
     struct OctetString {
 
@@ -484,119 +306,143 @@ namespace BER {
         }
 
         void write(auto& writer, auto const& value) const {
-            writer.write(Length(value.size()));
-            writer.bytes.write(value);
+            writer.write(value);
+        }
+
+        std::optional<std::string_view> read(auto&& reader) const {
+            return reader.read(reader.size());
         }
 
     };
-    constexpr auto octet_string = universal_type<Encoding::Primitive>(Universal::OctetString, OctetString());
+    constexpr auto octet_string = type(Encoding::Primitive, 4, OctetString());
 
-    template<typename ... Types>
-    struct Sequence {
+    struct Null {
 
-        std::tuple<Types...> types;
-        explicit constexpr Sequence(auto&&... types):
-            types(std::forward<decltype(types)>(types)...) {}
-
-        template<size_t ... indices>
-        constexpr auto transform(auto&& tuple, std::index_sequence<indices...>) const {
-            return std::tuple(std::get<indices>(types)(std::get<indices>(std::forward<decltype(tuple)>(tuple)))...);
-        }
-        auto operator()(auto&&... args) const {
-            return transform(std::tuple(std::forward<decltype(args)>(args)...), std::index_sequence_for<decltype(args)...>{});
+        constexpr auto operator()(nullptr_t value = nullptr) const {
+            return value;
         }
 
         void write(auto& writer, auto const& value) const {
-            auto counter = Writer<BytesCounter>{BytesCounter()};
-            write_elements(counter, value);
-            writer.write(Length(counter.bytes.count));
-            write_elements(writer, value);
+            // nothing to write
         }
 
-        void write_elements(auto& writer, auto const& elements) const {
-            // TODO
-            std::apply([&](auto&&... args){ (writer.write(args), ...); }, elements);
+        std::optional<std::nullptr_t> read(auto&& reader) const {
+            return nullptr;
         }
 
     };
-    constexpr auto sequence(auto&&... args) {
-        return universal_type<Encoding::Constructed>(Universal::Sequence,
-            Sequence<std::decay_t<decltype(args)>...>(std::forward<decltype(args)>(args)...));
-    }
+    constexpr auto null = type(Encoding::Primitive, 5, Null());
 
-    template<typename Type>
-    struct SequenceOf {
+    // template<typename ... Types>
+    // struct Sequence {
 
-        Type type;
-        explicit constexpr SequenceOf(auto&& type):
-            type(std::forward<decltype(type)>(type)) {}
+    //     std::tuple<Types...> types;
+    //     explicit constexpr Sequence(auto&&... types):
+    //         types(std::forward<decltype(types)>(types)...) {}
 
-        auto operator()(auto&&... args) const {
-            return std::experimental::make_array(type(std::forward<decltype(args)>(args))...);
-        }
+    //     template<size_t ... indices>
+    //     constexpr auto transform(auto&& tuple, std::index_sequence<indices...>) const {
+    //         return std::tuple(std::get<indices>(types)(std::get<indices>(std::forward<decltype(tuple)>(tuple)))...);
+    //     }
+    //     auto operator()(auto&&... args) const {
+    //         return std::tuple(std::forward<decltype(args)>(args)...);
+    //         // return transform(std::tuple(std::forward<decltype(args)>(args)...), std::index_sequence_for<decltype(args)...>{});
+    //     }
 
-        void write(auto& writer, auto const& value) const {
-            auto counter = Writer<BytesCounter>{BytesCounter()};
-            write_elements(counter, value);
-            writer.write(Length(counter.bytes.count));
-            write_elements(writer, value);
-        }
+    //     void write(auto& writer, auto const& value) const {
+    //         auto counter = Writer<BytesCounter>{BytesCounter()};
+    //         auto indices = std::make_index_sequence<std::tuple_size_v<decltype(value)>>{};
+    //         write_elements(counter, value, indices);
+    //         writer.write(Length(counter.bytes.count));
+    //         write_elements(writer, value, indices);
+    //     }
 
-        void write_elements(auto& writer, auto const& elements) const {
-            for (auto const& element : elements) {
-                writer.write(element);
-            }
-        }
+    //     template<size_t ... indices>
+    //     void write_elements(auto& writer, auto const& elements, std::index_sequence<indices...>) const {
+    //         // TODO
+    //         // std::apply([&](auto&&... args){ (writer.write(args), ...); }, elements);
+    //     }
 
-    };
-    constexpr auto sequence_of(auto&& type) {
-        return universal_type<Encoding::Constructed>(Universal::SequenceOf,
-            SequenceOf<std::decay_t<decltype(type)>>(std::forward<decltype(type)>(type)));
-    }
+    // };
+    // constexpr auto sequence(auto&&... elements) {
+    //     return type<Encoding::Constructed, Universal::Sequence>(
+    //         Sequence<std::decay_t<decltype(elements)>...>(std::forward<decltype(elements)>(elements)...));
+    // }
 
-    template<typename Type>
-    struct Optional {
+    // template<typename Type>
+    // struct SequenceOf {
 
-        Type type;
-        explicit constexpr Optional(auto&& type):
-            type(std::forward<decltype(type)>(type)) {}
+    //     Type type;
+    //     explicit constexpr SequenceOf(auto&& type):
+    //         type(std::forward<decltype(type)>(type)) {}
 
-        template<typename Value>
-        struct Writable {
+    //     auto operator()(auto&&... args) const {
+    //         // return std::experimental::make_array(type(std::forward<decltype(args)>(args))...);
+    //         return std::experimental::make_array(std::forward<decltype(args)>(args)...);
+    //     }
 
-            Type type;
-            Value value;
+    //     void write(auto& writer, auto const& value) const {
+    //         auto counter = Writer<BytesCounter>{BytesCounter()};
+    //         write_elements(counter, value);
+    //         writer.write(Length(counter.bytes.count));
+    //         write_elements(writer, value);
+    //     }
 
-            explicit constexpr Writable(Type type, Value value):
-                type(std::forward<decltype(type)>(type)),
-                value(std::forward<decltype(value)>(value)) {}
+    //     void write_elements(auto& writer, auto const& elements) const {
+    //         for (auto const& element : elements) {
+    //             writer.write(type(element));
+    //         }
+    //     }
 
-            void write(auto& output) const {
-                if (value) {
-                    type.identifier_write(output);
-                    type.writer.write(output, *value);
-                }
-            }
+    // };
+    // constexpr auto sequence_of(auto&& elements) {
+    //     return type<Encoding::Constructed, Universal::SequenceOf>(
+    //         SequenceOf<std::decay_t<decltype(elements)>>(std::forward<decltype(elements)>(elements)));
+    // }
 
-        };
+    // template<typename Type>
+    // struct Optional {
 
-        struct Nullopt {
-            void write(auto& output) const {
-            }
-        };
+    //     Type type;
+    //     explicit constexpr Optional(auto&& type):
+    //         type(std::forward<decltype(type)>(type)) {}
 
-        auto operator()(auto&& value) const {
-            // if constexpr (std::is_same_v<std::decay_t<decltype(value)>, std::nullptr_t>) {
-                return Nullopt{};
-            // } else {
-            //     return Writable(type, std::optional(std::forward<decltype(value)>(value)));
-            // }
-        }
+    //     template<typename Value>
+    //     struct Writable {
 
-    };
-    constexpr auto optional(auto&& type) {
-        return Optional<std::decay_t<decltype(type)>>(std::forward<decltype(type)>(type));
-    }
+    //         Type type;
+    //         Value value;
+
+    //         explicit constexpr Writable(Type type, Value value):
+    //             type(std::forward<decltype(type)>(type)),
+    //             value(std::forward<decltype(value)>(value)) {}
+
+    //         void write(auto& output) const {
+    //             if (value) {
+    //                 type.identifier_write(output);
+    //                 type.writer.write(output, *value);
+    //             }
+    //         }
+
+    //     };
+
+    //     struct Nullopt {
+    //         void write(auto& output) const {
+    //         }
+    //     };
+
+    //     auto operator()(auto&& value) const {
+    //         // if constexpr (std::is_same_v<std::decay_t<decltype(value)>, std::nullptr_t>) {
+    //             return Nullopt{};
+    //         // } else {
+    //         //     return Writable(type, std::optional(std::forward<decltype(value)>(value)));
+    //         // }
+    //     }
+
+    // };
+    // constexpr auto optional(auto&& type) {
+    //     return Optional<std::decay_t<decltype(type)>>(std::forward<decltype(type)>(type));
+    // }
 
     // template<typename ... Choices>
     // struct Choice {
