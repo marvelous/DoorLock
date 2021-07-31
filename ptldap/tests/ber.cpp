@@ -49,7 +49,7 @@ TEST_CASE("Length") {
         length_write_read("\x84\xff\xff\xff\xfe"sv, 0xfffffffe);
     }
 
-    SECTION("Long Long") {
+    SECTION("overflow") {
         uint8_t header_size = 1;
         uint8_t data_length_size = 127;
 
@@ -66,22 +66,22 @@ TEST_CASE("Length") {
 
 auto primitive_write(auto&& type, auto&& value, auto&& bytes) {
     auto writer = Bytes::StringWriter();
-    type(value).write(writer);
-    check_bytes(writer.string, bytes);
+    FWD(type)(FWD(value)).write(writer);
+    check_bytes(writer.string, FWD(bytes));
 }
 auto primitive_read(auto&& type, auto&& value, auto&& bytes) {
-    auto reader = Bytes::StringViewReader{bytes};
-    CHECK(TRY(type.read(reader)) == value);
+    auto reader = Bytes::StringViewReader{FWD(bytes)};
+    CHECK(TRY(FWD(type).read(reader)) == FWD(value));
     check_bytes(reader.string, ""sv);
 }
 auto primitive_write_read(auto&& type, auto&& value, auto&& bytes) {
-    primitive_write(type, value, bytes);
-    primitive_read(type, value, bytes);
+    primitive_write(FWD(type), FWD(value), FWD(bytes));
+    primitive_read(FWD(type), FWD(value), FWD(bytes));
 }
 auto primitive_read_fail(auto&& type, auto&& bytes, auto&& remainder) {
-    auto reader = Bytes::StringViewReader{bytes};
-    CHECK(!type.read(reader));
-    check_bytes(reader.string, remainder);
+    auto reader = Bytes::StringViewReader{FWD(bytes)};
+    CHECK(!FWD(type).read(reader));
+    check_bytes(reader.string, FWD(remainder));
 }
 
 TEST_CASE("primitives") {
@@ -127,5 +127,13 @@ TEST_CASE("sequence") {
     // CHECK(element2 == 0x42);
     // check_bytes(sequence.bytes.string, ""sv);
     // check_bytes(reader.bytes.string, ""sv);
+
+}
+
+TEST_CASE("optional") {
+
+    primitive_write(BER::optional(boolean), std::optional(false), "\x01\x01\x00"sv);
+    primitive_write(BER::optional(boolean), std::optional<bool>(), ""sv);
+    // primitive_write(optional(boolean), false, "\x01\x01\x00"sv);
 
 }

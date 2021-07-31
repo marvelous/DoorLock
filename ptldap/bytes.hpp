@@ -2,6 +2,7 @@
 #include <ostream>
 #include "string_view.hpp"
 
+#define FWD(val) std::forward<decltype(val)>(val)
 #define OPT_REQUIRE(condition) if (!(condition)) return std::nullopt
 #define OPT_TRY(optional) ({ auto ref = (optional); OPT_REQUIRE(ref); *ref; })
 #define TRY(optional) ({ auto ref = (optional); REQUIRE(ref); *ref; })

@@ -63,9 +63,9 @@ namespace BER {
         TagNumber tag_number;
 
         explicit constexpr Identifier(Encoding encoding, TagClass tag_class, TagNumber tag_number):
-            encoding(std::forward<decltype(encoding)>(encoding)),
-            tag_class(std::forward<decltype(tag_class)>(tag_class)),
-            tag_number(std::forward<decltype(tag_number)>(tag_number)) {}
+            encoding(FWD(encoding)),
+            tag_class(FWD(tag_class)),
+            tag_number(FWD(tag_number)) {}
 
         void write(auto& writer) const {
             auto tag_class = to_int(this->tag_class);
@@ -186,17 +186,11 @@ namespace BER {
         Value value;
 
         explicit constexpr Writable(Type type, Value value):
-            type(std::forward<decltype(type)>(type)),
-            value(std::forward<decltype(value)>(value)) {}
+            type(FWD(type)),
+            value(FWD(value)) {}
 
         void write(auto& writer) const {
-            type.identifier.write(writer);
-
-            auto counter = Bytes::CounterWriter();
-            type.serde.write(counter, value);
-            Length(counter.count).write(writer);
-
-            type.serde.write(writer, value);
+            type.write(writer, value);
         }
 
     };
@@ -208,8 +202,8 @@ namespace BER {
         Serde serde;
 
         explicit constexpr Type(Identifier identifier, Serde serde):
-            identifier(std::forward<decltype(identifier)>(identifier)),
-            serde(std::forward<decltype(serde)>(serde)) {}
+            identifier(FWD(identifier)),
+            serde(FWD(serde)) {}
 
         constexpr auto tagged(TagClass tag_class, auto tag_number) const {
             return BER::Type(BER::Identifier(identifier.encoding, tag_class, tag_number), serde);
@@ -224,7 +218,17 @@ namespace BER {
         }
 
         constexpr auto operator()(auto&&... args) const {
-            return BER::Writable(*this, serde(std::forward<decltype(args)>(args)...));
+            return BER::Writable(*this, serde(FWD(args)...));
+        }
+
+        void write(auto& writer, auto& value) const {
+            identifier.write(writer);
+
+            auto counter = Bytes::CounterWriter();
+            serde.write(counter, value);
+            Length(counter.count).write(writer);
+
+            serde.write(writer, value);
         }
 
         auto read(auto& reader) const -> decltype(serde.read(std::string_view())) {
@@ -247,7 +251,7 @@ namespace BER {
 
     struct Boolean {
 
-        bool operator()(auto value) const {
+        auto operator()(bool value) const {
             return value;
         }
 
@@ -265,8 +269,8 @@ namespace BER {
     template<typename Integral = int> // TODO
     struct Integer {
 
-        auto operator()(auto value) const {
-            return std::move(value);
+        auto operator()(Integral&& value) const {
+            return FWD(value);
         }
 
         void write(auto& writer, auto const& value) const {
@@ -301,8 +305,8 @@ namespace BER {
 
     struct OctetString {
 
-        auto operator()(auto value) const {
-            return value;
+        auto operator()(auto&& value) const {
+            return FWD(value);
         }
 
         void write(auto& writer, auto const& value) const {
@@ -338,15 +342,15 @@ namespace BER {
 
     //     std::tuple<Types...> types;
     //     explicit constexpr Sequence(auto&&... types):
-    //         types(std::forward<decltype(types)>(types)...) {}
+    //         types(FWD(types)...) {}
 
     //     template<size_t ... indices>
     //     constexpr auto transform(auto&& tuple, std::index_sequence<indices...>) const {
-    //         return std::tuple(std::get<indices>(types)(std::get<indices>(std::forward<decltype(tuple)>(tuple)))...);
+    //         return std::tuple(std::get<indices>(types)(std::get<indices>(FWD(tuple)))...);
     //     }
     //     auto operator()(auto&&... args) const {
-    //         return std::tuple(std::forward<decltype(args)>(args)...);
-    //         // return transform(std::tuple(std::forward<decltype(args)>(args)...), std::index_sequence_for<decltype(args)...>{});
+    //         return std::tuple(FWD(args)...);
+    //         // return transform(std::tuple(FWD(args)...), std::index_sequence_for<decltype(args)...>{});
     //     }
 
     //     void write(auto& writer, auto const& value) const {
@@ -366,7 +370,7 @@ namespace BER {
     // };
     // constexpr auto sequence(auto&&... elements) {
     //     return type<Encoding::Constructed, Universal::Sequence>(
-    //         Sequence<std::decay_t<decltype(elements)>...>(std::forward<decltype(elements)>(elements)...));
+    //         Sequence<std::decay_t<decltype(elements)>...>(FWD(elements)...));
     // }
 
     // template<typename Type>
@@ -374,11 +378,11 @@ namespace BER {
 
     //     Type type;
     //     explicit constexpr SequenceOf(auto&& type):
-    //         type(std::forward<decltype(type)>(type)) {}
+    //         type(FWD(type)) {}
 
     //     auto operator()(auto&&... args) const {
-    //         // return std::experimental::make_array(type(std::forward<decltype(args)>(args))...);
-    //         return std::experimental::make_array(std::forward<decltype(args)>(args)...);
+    //         // return std::experimental::make_array(type(FWD(args))...);
+    //         return std::experimental::make_array(FWD(args)...);
     //     }
 
     //     void write(auto& writer, auto const& value) const {
@@ -397,52 +401,34 @@ namespace BER {
     // };
     // constexpr auto sequence_of(auto&& elements) {
     //     return type<Encoding::Constructed, Universal::SequenceOf>(
-    //         SequenceOf<std::decay_t<decltype(elements)>>(std::forward<decltype(elements)>(elements)));
+    //         SequenceOf<std::decay_t<decltype(elements)>>(FWD(elements)));
     // }
 
-    // template<typename Type>
-    // struct Optional {
+    template<typename Type>
+    struct Optional {
 
-    //     Type type;
-    //     explicit constexpr Optional(auto&& type):
-    //         type(std::forward<decltype(type)>(type)) {}
+        Type type;
+        explicit constexpr Optional(auto&& type):
+            type(FWD(type)) {}
 
-    //     template<typename Value>
-    //     struct Writable {
+        constexpr auto operator()(auto&& args) const {
+            return BER::Writable(*this, FWD(args));
+        }
 
-    //         Type type;
-    //         Value value;
+        void write(auto& writer, auto const& value) const {
+            if (value) {
+                type(*value).write(writer);
+            }
+        }
 
-    //         explicit constexpr Writable(Type type, Value value):
-    //             type(std::forward<decltype(type)>(type)),
-    //             value(std::forward<decltype(value)>(value)) {}
+        auto read(auto&& reader) const {
+            // auto result = ;
+        }
 
-    //         void write(auto& output) const {
-    //             if (value) {
-    //                 type.identifier_write(output);
-    //                 type.writer.write(output, *value);
-    //             }
-    //         }
-
-    //     };
-
-    //     struct Nullopt {
-    //         void write(auto& output) const {
-    //         }
-    //     };
-
-    //     auto operator()(auto&& value) const {
-    //         // if constexpr (std::is_same_v<std::decay_t<decltype(value)>, std::nullptr_t>) {
-    //             return Nullopt{};
-    //         // } else {
-    //         //     return Writable(type, std::optional(std::forward<decltype(value)>(value)));
-    //         // }
-    //     }
-
-    // };
-    // constexpr auto optional(auto&& type) {
-    //     return Optional<std::decay_t<decltype(type)>>(std::forward<decltype(type)>(type));
-    // }
+    };
+    constexpr auto optional(auto&& type) {
+        return Optional<decltype(type)>(FWD(type));
+    }
 
     // template<typename ... Choices>
     // struct Choice {
@@ -461,7 +447,7 @@ namespace BER {
     //     std::variant<Choices...> value;
 
     //     template<typename ... Args>
-    //     Choice(Args&&... args): value(std::forward<Args>(args)...) {}
+    //     Choice(Args&&... args): value(FWD(args)...) {}
 
     // };
 
