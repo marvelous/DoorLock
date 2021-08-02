@@ -3,7 +3,7 @@
 #include "catch.hpp"
 #include "tools.hpp"
 
-using namespace std;
+using namespace std::literals::string_view_literals;
 using namespace BER;
 
 auto identifier_write_read(auto&& bytes, auto&& encoding, auto&& tag_class, auto&& tag_number) {
@@ -28,7 +28,7 @@ TEST_CASE("Identifier") {
 
 void length_read(auto&& bytes, auto&& length) {
     auto reader = Bytes::StringViewReader{bytes};
-    CHECK(TRY(Length::read(reader)).length == length);
+    CHECK(TRY(Length::read(reader)).length == Length(FWD(length)).length);
     check_bytes(reader.string, ""sv);
 };
 void length_write_read(auto&& bytes, auto&& length) {
@@ -55,7 +55,7 @@ TEST_CASE("Length") {
 
         // Create a string with the first byte (0xff) standing for: long-form, 127 bytes for data length
         // And with 127 bytes of data length, all set to 255 (we are counting all particles in the galaxy quite a few times)
-        auto bytes = string(header_size + data_length_size, (char)0xff);
+        auto bytes = std::string(header_size + data_length_size, (char)0xff);
         auto reader = Bytes::StringViewReader{bytes};
 
         // we don't support arbitrary length
@@ -71,17 +71,18 @@ auto primitive_write(auto&& type, auto&& value, auto&& bytes) {
 }
 auto primitive_read(auto&& type, auto&& value, auto&& bytes) {
     auto reader = Bytes::StringViewReader{FWD(bytes)};
-    CHECK(TRY(FWD(type).read(reader)) == FWD(value));
+    auto actual = TRY(FWD(type).read(reader));
+    CHECK(actual == FWD(value));
     check_bytes(reader.string, ""sv);
 }
 auto primitive_write_read(auto&& type, auto&& value, auto&& bytes) {
     primitive_write(FWD(type), FWD(value), FWD(bytes));
     primitive_read(FWD(type), FWD(value), FWD(bytes));
 }
-auto primitive_read_fail(auto&& type, auto&& bytes, auto&& remainder) {
-    auto reader = Bytes::StringViewReader{FWD(bytes)};
+auto primitive_read_fail(auto&& type, auto&& bytes) {
+    auto reader = Bytes::StringViewReader{bytes};
     CHECK(!FWD(type).read(reader));
-    check_bytes(reader.string, FWD(remainder));
+    check_bytes(reader.string, ""sv);
 }
 
 TEST_CASE("primitives") {
@@ -89,7 +90,7 @@ TEST_CASE("primitives") {
     primitive_write_read(boolean, false, "\x01\x01\x00"sv);
     primitive_write_read(boolean, true, "\x01\x01\xff"sv);
     primitive_read(boolean, true, "\x01\x01\x01"sv);
-    primitive_read_fail(boolean, "\x01\x02\x01\x42\x43"sv, "\x43"sv);
+    primitive_read_fail(boolean, "\x01\x02\x01\x42"sv);
     primitive_write_read(integer, INT32_MIN, "\x02\x04\x80\x00\x00\x00"sv);
     primitive_write_read(integer, signed(0xdeadbeef), "\x02\x04\xDE\xAD\xBE\xEF"sv);
     primitive_write_read(integer, -(1 << 23) - 1, "\x02\x04\xff\x7f\xff\xff"sv);
@@ -111,7 +112,7 @@ TEST_CASE("primitives") {
     primitive_write_read(integer, INT32_MAX, "\x02\x04\x7f\xff\xff\xff"sv);
     primitive_write_read(octet_string, "hello"sv, "\x04\x05hello"sv);
     primitive_write_read(null, nullptr, "\x05\x00"sv);
-    primitive_read_fail(null, "\x05\x01\x00\x42"sv, "\x42"sv);
+    primitive_read_fail(null, "\x05\x01\x00"sv);
 
 }
 
@@ -130,10 +131,21 @@ TEST_CASE("sequence") {
 
 }
 
+auto optional_read(auto&& type, auto&& value, auto&& bytes) {
+    auto reader = Bytes::StringViewReader{bytes};
+    auto actual = TRY(FWD(type).read(reader));
+    CHECK(actual == FWD(value));
+    // expect unconsumed input
+    check_bytes(reader.string, bytes);
+}
+
 TEST_CASE("optional") {
 
-    primitive_write(BER::optional(boolean), std::optional(false), "\x01\x01\x00"sv);
-    primitive_write(BER::optional(boolean), std::optional<bool>(), ""sv);
-    // primitive_write(optional(boolean), false, "\x01\x01\x00"sv);
+    primitive_write_read(BER::optional(boolean), std::optional(false), "\x01\x01\x00"sv);
+    primitive_write_read(BER::optional(boolean), std::optional(true), "\x01\x01\xff"sv);
+    primitive_write_read(BER::optional(boolean), std::optional<bool>(), ""sv);
+    optional_read(BER::optional(boolean), std::optional<bool>(), "\x02\x01\x00"sv);
+    primitive_write(BER::optional(boolean), std::nullopt, ""sv);
+    primitive_write(optional(boolean), false, "\x01\x01\x00"sv);
 
 }

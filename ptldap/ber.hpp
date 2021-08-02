@@ -120,13 +120,11 @@ namespace BER {
 
         static constexpr uint8_t Indefinite = 0b0000000;
 
-        size_t length;
-
-        explicit Length(size_t length): length(length) {}
-        explicit Length(): length(SIZE_MAX) {}
+        std::optional<size_t> length;
+        explicit Length(std::optional<size_t>&& length): length(FWD(length)) {}
 
         bool is_indefinite() const {
-            return length == SIZE_MAX;
+            return !length.has_value();
         }
 
         void write(auto& bytes) const {
@@ -139,7 +137,7 @@ namespace BER {
                 return;
             }
 
-            auto count = length;
+            auto count = *length;
             if (count <= 0b01111111) {
                 write_length(Form::Short, count);
                 return;
@@ -164,7 +162,7 @@ namespace BER {
 
             auto count = (byte & 0b01111111) >> 0;
             if (count == Indefinite) {
-                return Length();
+                return Length(std::nullopt);
             }
             OPT_REQUIRE(count <= sizeof(size_t));
 
@@ -238,15 +236,15 @@ namespace BER {
             auto length = OPT_TRY(Length::read(reader));
             OPT_REQUIRE(!length.is_indefinite());
 
-            auto bytes = Bytes::StringViewReader{OPT_TRY(reader.read(length.length))};
+            auto bytes = Bytes::StringViewReader{OPT_TRY(reader.read(*length.length))};
             auto value = serde.read(bytes);
             OPT_REQUIRE(bytes.empty());
             return value;
         }
 
     };
-    constexpr auto type(Encoding encoding, auto tag_number, auto serde) {
-        return Type(Identifier(encoding, TagClass::Universal, tag_number), serde);
+    constexpr auto type(Encoding encoding, auto&& tag_number, auto&& serde) {
+        return Type(Identifier(encoding, TagClass::Universal, FWD(tag_number)), FWD(serde));
     }
 
     struct Boolean {
@@ -411,18 +409,30 @@ namespace BER {
         explicit constexpr Optional(auto&& type):
             type(FWD(type)) {}
 
-        constexpr auto operator()(auto&& args) const {
-            return BER::Writable(*this, FWD(args));
+        constexpr auto operator()(auto&& value) const {
+            return BER::Writable(*this, FWD(value));
         }
 
-        void write(auto& writer, auto const& value) const {
+        void write(auto& writer, std::nullopt_t) const {
+            // write nothing
+        }
+        void write(auto& writer, auto&& value) const {
+            type(FWD(value)).write(writer);
+        }
+        template<typename Value>
+        void write(auto& writer, std::optional<Value> const& value) const {
             if (value) {
                 type(*value).write(writer);
             }
         }
 
         auto read(auto&& reader) const {
-            // auto result = ;
+            auto state = reader;
+            auto result = type.read(reader);
+            if (!result) {
+                reader = FWD(state);
+            }
+            return std::optional<decltype(result)>(FWD(result));
         }
 
     };
