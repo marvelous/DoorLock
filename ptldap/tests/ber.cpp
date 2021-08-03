@@ -64,55 +64,61 @@ TEST_CASE("Length") {
 
 }
 
-auto primitive_write(auto&& type, auto&& value, auto&& bytes) {
+auto type_write(auto&& type, auto&& bytes, auto&&... value) {
     auto writer = Bytes::StringWriter();
-    FWD(type)(FWD(value)).write(writer);
+    FWD(type)(FWD(value)...).write(writer);
     check_bytes(writer.string, FWD(bytes));
 }
-auto primitive_read(auto&& type, auto&& value, auto&& bytes) {
+auto type_read(auto&& type, auto&& bytes, auto&& value, auto&& remainder) {
     auto reader = Bytes::StringViewReader{FWD(bytes)};
     auto actual = TRY(FWD(type).read(reader));
     CHECK(actual == FWD(value));
-    check_bytes(reader.string, ""sv);
+    check_bytes(reader.string, remainder);
 }
-auto primitive_write_read(auto&& type, auto&& value, auto&& bytes) {
-    primitive_write(FWD(type), FWD(value), FWD(bytes));
-    primitive_read(FWD(type), FWD(value), FWD(bytes));
+auto type_read(auto&& type, auto&& bytes, auto&& value) {
+    type_read(FWD(type), FWD(bytes), FWD(value), ""sv);
 }
-auto primitive_read_fail(auto&& type, auto&& bytes) {
+auto type_write_read(auto&& type, auto&& bytes, auto&& value) {
+    type_write(FWD(type), FWD(bytes), FWD(value));
+    type_read(FWD(type), FWD(bytes), FWD(value));
+}
+auto type_read_fail(auto&& type, auto&& bytes, auto&& remainder) {
     auto reader = Bytes::StringViewReader{bytes};
     CHECK(!FWD(type).read(reader));
-    check_bytes(reader.string, ""sv);
+    check_bytes(reader.string, remainder);
+}
+auto type_read_fail(auto&& type, auto&& bytes) {
+    type_read_fail(FWD(type), FWD(bytes), ""sv);
 }
 
 TEST_CASE("primitives") {
 
-    primitive_write_read(boolean, false, "\x01\x01\x00"sv);
-    primitive_write_read(boolean, true, "\x01\x01\xff"sv);
-    primitive_read(boolean, true, "\x01\x01\x01"sv);
-    primitive_read_fail(boolean, "\x01\x02\x01\x42"sv);
-    primitive_write_read(integer, INT32_MIN, "\x02\x04\x80\x00\x00\x00"sv);
-    primitive_write_read(integer, signed(0xdeadbeef), "\x02\x04\xDE\xAD\xBE\xEF"sv);
-    primitive_write_read(integer, -(1 << 23) - 1, "\x02\x04\xff\x7f\xff\xff"sv);
-    primitive_write_read(integer, -(1 << 23), "\x02\x03\x80\x00\x00"sv);
-    primitive_write_read(integer, -(1 << 15) - 1, "\x02\x03\xff\x7f\xff"sv);
-    primitive_write_read(integer, -(1 << 15), "\x02\x02\x80\x00"sv);
-    primitive_write_read(integer, -129, "\x02\x02\xFF\x7F"sv);
-    primitive_write_read(integer, -128, "\x02\x01\x80"sv);
-    primitive_write_read(integer, -1, "\x02\x01\xFF"sv);
-    primitive_write_read(integer, 0, "\x02\x01\x00"sv);
-    primitive_write_read(integer, 1, "\x02\x01\x01"sv);
-    primitive_write_read(integer, (1 << 7) - 1, "\x02\x01\x7F"sv);
-    primitive_write_read(integer, (1 << 7), "\x02\x02\x00\x80"sv);
-    primitive_write_read(integer, 256, "\x02\x02\x01\x00"sv);
-    primitive_write_read(integer, (1 << 15) - 1, "\x02\x02\x7f\xff"sv);
-    primitive_write_read(integer, (1 << 15), "\x02\x03\x00\x80\x00"sv);
-    primitive_write_read(integer, (1 << 23) - 1, "\x02\x03\x7f\xff\xff"sv);
-    primitive_write_read(integer, (1 << 23), "\x02\x04\x00\x80\x00\x00"sv);
-    primitive_write_read(integer, INT32_MAX, "\x02\x04\x7f\xff\xff\xff"sv);
-    primitive_write_read(octet_string, "hello"sv, "\x04\x05hello"sv);
-    primitive_write_read(null, nullptr, "\x05\x00"sv);
-    primitive_read_fail(null, "\x05\x01\x00"sv);
+    type_write_read(boolean, "\x01\x01\x00"sv, false);
+    type_write_read(boolean, "\x01\x01\xff"sv, true);
+    type_read(boolean, "\x01\x01\x01"sv, true);
+    type_read_fail(boolean, "\x01\x02\x01\x42"sv);
+    type_write_read(integer, "\x02\x04\x80\x00\x00\x00"sv, INT32_MIN);
+    type_write_read(integer, "\x02\x04\xDE\xAD\xBE\xEF"sv, signed(0xdeadbeef));
+    type_write_read(integer, "\x02\x04\xff\x7f\xff\xff"sv, -(1 << 23) - 1);
+    type_write_read(integer, "\x02\x03\x80\x00\x00"sv, -(1 << 23));
+    type_write_read(integer, "\x02\x03\xff\x7f\xff"sv, -(1 << 15) - 1);
+    type_write_read(integer, "\x02\x02\x80\x00"sv, -(1 << 15));
+    type_write_read(integer, "\x02\x02\xFF\x7F"sv, -129);
+    type_write_read(integer, "\x02\x01\x80"sv, -128);
+    type_write_read(integer, "\x02\x01\xFF"sv, -1);
+    type_write_read(integer, "\x02\x01\x00"sv, 0);
+    type_write_read(integer, "\x02\x01\x01"sv, 1);
+    type_write_read(integer, "\x02\x01\x7F"sv, (1 << 7) - 1);
+    type_write_read(integer, "\x02\x02\x00\x80"sv, (1 << 7));
+    type_write_read(integer, "\x02\x02\x01\x00"sv, 256);
+    type_write_read(integer, "\x02\x02\x7f\xff"sv, (1 << 15) - 1);
+    type_write_read(integer, "\x02\x03\x00\x80\x00"sv, (1 << 15));
+    type_write_read(integer, "\x02\x03\x7f\xff\xff"sv, (1 << 23) - 1);
+    type_write_read(integer, "\x02\x04\x00\x80\x00\x00"sv, (1 << 23));
+    type_write_read(integer, "\x02\x04\x7f\xff\xff\xff"sv, INT32_MAX);
+    type_write_read(octet_string, "\x04\x05hello"sv, "hello"sv);
+    type_write_read(null, "\x05\x00"sv, nullptr);
+    type_read_fail(null, "\x05\x01\x00"sv);
 
 }
 
@@ -131,21 +137,32 @@ TEST_CASE("sequence") {
 
 }
 
-auto optional_read(auto&& type, auto&& value, auto&& bytes) {
+auto optional_read_fail(auto&& type, auto&& bytes) {
     auto reader = Bytes::StringViewReader{bytes};
     auto actual = TRY(FWD(type).read(reader));
-    CHECK(actual == FWD(value));
+    CHECK(!actual.has_value());
     // expect unconsumed input
     check_bytes(reader.string, bytes);
 }
 
 TEST_CASE("optional") {
 
-    primitive_write_read(BER::optional(boolean), std::optional(false), "\x01\x01\x00"sv);
-    primitive_write_read(BER::optional(boolean), std::optional(true), "\x01\x01\xff"sv);
-    primitive_write_read(BER::optional(boolean), std::optional<bool>(), ""sv);
-    optional_read(BER::optional(boolean), std::optional<bool>(), "\x02\x01\x00"sv);
-    primitive_write(BER::optional(boolean), std::nullopt, ""sv);
-    primitive_write(optional(boolean), false, "\x01\x01\x00"sv);
+    type_write_read(optional(boolean), "\x01\x01\x00"sv, std::optional(false));
+    type_write_read(optional(boolean), "\x01\x01\xff"sv, std::optional(true));
+    type_write_read(optional(boolean), ""sv, std::optional<bool>());
+    optional_read_fail(optional(boolean), "\x02\x01\x00"sv);
+    type_write(optional(boolean), ""sv, std::nullopt);
+    type_write(optional(boolean), "\x01\x01\x00"sv, false);
+
+}
+
+TEST_CASE("sequence_of") {
+
+    type_write(BER::sequence_of(boolean), "\x30\x03\x01\x01\x00"sv, false);
+    type_write(BER::sequence_of(boolean), "\x30\x06\x01\x01\x00\x01\x01\xff"sv, false, true);
+    type_read(BER::sequence_of(boolean), "\x30\x03\x01\x01\x00"sv, Bytes::StringViewReader{"\x01\x01\x00"sv});
+    type_read(BER::sequence_of(boolean), "\x30\x02\x01\x01\x00"sv, Bytes::StringViewReader{"\x01\x01"sv}, "\x00"sv);
+    type_read_fail(BER::sequence_of(boolean), "\x30\x04\x01\x01\x00"sv, "\x01\x01\x00"sv);
+    type_read(BER::sequence_of(boolean), "\x30\x04\x01\x01\x00\x00"sv, Bytes::StringViewReader{"\x01\x01\x00\x00"sv});
 
 }

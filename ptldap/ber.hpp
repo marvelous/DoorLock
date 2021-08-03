@@ -229,7 +229,7 @@ namespace BER {
             serde.write(writer, value);
         }
 
-        auto read(auto& reader) const -> decltype(serde.read(std::string_view())) {
+        auto read(auto& reader) const -> decltype(serde.read(Bytes::StringViewReader{std::string_view()})) {
             auto identifier = OPT_TRY(Identifier::read(reader));
             OPT_REQUIRE(identifier == this->identifier);
 
@@ -371,36 +371,33 @@ namespace BER {
     //         Sequence<std::decay_t<decltype(elements)>...>(FWD(elements)...));
     // }
 
-    // template<typename Type>
-    // struct SequenceOf {
+    template<typename Type>
+    struct SequenceOf {
 
-    //     Type type;
-    //     explicit constexpr SequenceOf(auto&& type):
-    //         type(FWD(type)) {}
+        Type type;
+        explicit constexpr SequenceOf(auto&& type):
+            type(FWD(type)) {}
 
-    //     auto operator()(auto&&... args) const {
-    //         // return std::experimental::make_array(type(FWD(args))...);
-    //         return std::experimental::make_array(FWD(args)...);
-    //     }
+        auto operator()(auto&&... args) const {
+            return std::experimental::make_array(FWD(args)...);
+        }
 
-    //     void write(auto& writer, auto const& value) const {
-    //         auto counter = Writer<BytesCounter>{BytesCounter()};
-    //         write_elements(counter, value);
-    //         writer.write(Length(counter.bytes.count));
-    //         write_elements(writer, value);
-    //     }
+        void write(auto& writer, auto const& elements) const {
+            for (auto const& element : elements) {
+                type(element).write(writer);
+            }
+        }
 
-    //     void write_elements(auto& writer, auto const& elements) const {
-    //         for (auto const& element : elements) {
-    //             writer.write(type(element));
-    //         }
-    //     }
+        std::optional<Bytes::StringViewReader> read(auto&& reader) const {
+            auto size = reader.size();
+            auto bytes = OPT_TRY(FWD(reader).read(size));
+            return Bytes::StringViewReader{FWD(bytes)};
+        }
 
-    // };
-    // constexpr auto sequence_of(auto&& elements) {
-    //     return type<Encoding::Constructed, Universal::SequenceOf>(
-    //         SequenceOf<std::decay_t<decltype(elements)>>(FWD(elements)));
-    // }
+    };
+    constexpr auto sequence_of(auto&& type) {
+        return BER::type(Encoding::Constructed, 0x10, SequenceOf<decltype(type)>(FWD(type)));
+    }
 
     template<typename Type>
     struct Optional {

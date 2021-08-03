@@ -39,6 +39,10 @@ namespace Bytes {
             return StringViewReader{OPT_TRY(read(length))};
         }
 
+        bool operator==(auto const& that) const {
+            return this->string == that.string;
+        }
+
     };
 
     struct StreamWriter {

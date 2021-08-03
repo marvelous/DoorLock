@@ -58,7 +58,7 @@ namespace LDAP {
 
     constexpr auto uri = ldap_string;
 
-    // constexpr auto referral = BER::sequence_of(uri);
+    constexpr auto referral = BER::sequence_of(uri);
 
     constexpr auto message_id = BER::integer;
 
