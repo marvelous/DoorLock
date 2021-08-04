@@ -229,7 +229,7 @@ namespace BER {
             serde.write(writer, value);
         }
 
-        auto read(auto& reader) const -> decltype(serde.read(Bytes::StringViewReader{std::string_view()})) {
+        auto read(auto& reader) const -> decltype(serde.read(reader)) {
             auto identifier = OPT_TRY(Identifier::read(reader));
             OPT_REQUIRE(identifier == this->identifier);
 
@@ -257,7 +257,7 @@ namespace BER {
             writer.write(value ? 0xff : 0x00);
         }
 
-        std::optional<bool> read(auto&& reader) const {
+        std::optional<bool> read(auto& reader) const {
             return reader.read() != 0x00;
         }
 
@@ -267,7 +267,7 @@ namespace BER {
     template<typename Integral = int> // TODO
     struct Integer {
 
-        auto operator()(Integral&& value) const {
+        Integral operator()(auto&& value) const {
             return FWD(value);
         }
 
@@ -279,7 +279,7 @@ namespace BER {
             writer.write(value & 0b11111111);
         }
 
-        std::optional<Integral> read(auto&& reader) const {
+        std::optional<Integral> read(auto& reader) const {
             auto length = reader.size();
             auto first = int8_t(OPT_TRY(reader.read()));
 
@@ -311,7 +311,7 @@ namespace BER {
             writer.write(value);
         }
 
-        std::optional<std::string_view> read(auto&& reader) const {
+        std::optional<std::string_view> read(auto& reader) const {
             return reader.read(reader.size());
         }
 
@@ -328,48 +328,53 @@ namespace BER {
             // nothing to write
         }
 
-        std::optional<std::nullptr_t> read(auto&& reader) const {
+        std::optional<std::nullptr_t> read(auto& reader) const {
             return nullptr;
         }
 
     };
     constexpr auto null = type(Encoding::Primitive, 5, Null());
 
-    // template<typename ... Types>
-    // struct Sequence {
+    template<typename ... Types>
+    struct Sequence {
 
-    //     std::tuple<Types...> types;
-    //     explicit constexpr Sequence(auto&&... types):
-    //         types(FWD(types)...) {}
+        std::tuple<Types...> types;
+        explicit constexpr Sequence(auto&&... types):
+            types(FWD(types)...) {}
 
-    //     template<size_t ... indices>
-    //     constexpr auto transform(auto&& tuple, std::index_sequence<indices...>) const {
-    //         return std::tuple(std::get<indices>(types)(std::get<indices>(FWD(tuple)))...);
-    //     }
-    //     auto operator()(auto&&... args) const {
-    //         return std::tuple(FWD(args)...);
-    //         // return transform(std::tuple(FWD(args)...), std::index_sequence_for<decltype(args)...>{});
-    //     }
+        auto operator()(auto&&... args) const {
+            return std::tuple(FWD(args)...);
+        }
 
-    //     void write(auto& writer, auto const& value) const {
-    //         auto counter = Writer<BytesCounter>{BytesCounter()};
-    //         auto indices = std::make_index_sequence<std::tuple_size_v<decltype(value)>>{};
-    //         write_elements(counter, value, indices);
-    //         writer.write(Length(counter.bytes.count));
-    //         write_elements(writer, value, indices);
-    //     }
+        void write(auto& writer, auto const& elements) const {
+            auto indices = std::make_index_sequence<sizeof...(Types)>{};
+            write_elements(writer, elements, indices);
+        }
+        template<size_t ... indices>
+        void write_elements(auto& writer, auto const& elements, std::index_sequence<indices...>) const {
+            (std::get<indices>(types)(std::get<indices>(elements)).write(writer), ...);
+        }
 
-    //     template<size_t ... indices>
-    //     void write_elements(auto& writer, auto const& elements, std::index_sequence<indices...>) const {
-    //         // TODO
-    //         // std::apply([&](auto&&... args){ (writer.write(args), ...); }, elements);
-    //     }
+        auto read(auto& reader) const {
+            return read_elements<0, sizeof...(Types)>(reader);
+        }
+        template<size_t i, size_t max>
+        auto read_elements(auto& reader, auto&&... values) const {
+            if constexpr (i < max) {
+                auto value = std::get<i>(types).read(reader);
+                if (!value) {
+                    return decltype(read_elements<i + 1, max>(reader, FWD(values)..., FWD(*value))){};
+                }
+                return read_elements<i + 1, max>(reader, FWD(values)..., FWD(*value));
+            } else {
+                return std::optional(std::tuple(FWD(values)...));
+            }
+        }
 
-    // };
-    // constexpr auto sequence(auto&&... elements) {
-    //     return type<Encoding::Constructed, Universal::Sequence>(
-    //         Sequence<std::decay_t<decltype(elements)>...>(FWD(elements)...));
-    // }
+    };
+    constexpr auto sequence(auto&&... elements) {
+        return type(Encoding::Constructed, 0x10, Sequence<std::decay_t<decltype(elements)>...>(FWD(elements)...));
+    }
 
     template<typename Type>
     struct SequenceOf {
@@ -388,7 +393,7 @@ namespace BER {
             }
         }
 
-        std::optional<Bytes::StringViewReader> read(auto&& reader) const {
+        std::optional<Bytes::StringViewReader> read(auto& reader) const {
             auto size = reader.size();
             auto bytes = OPT_TRY(FWD(reader).read(size));
             return Bytes::StringViewReader{FWD(bytes)};
@@ -396,7 +401,7 @@ namespace BER {
 
     };
     constexpr auto sequence_of(auto&& type) {
-        return BER::type(Encoding::Constructed, 0x10, SequenceOf<decltype(type)>(FWD(type)));
+        return BER::type(Encoding::Constructed, 0x10, SequenceOf<std::decay_t<decltype(type)>>(FWD(type)));
     }
 
     template<typename Type>
@@ -423,10 +428,11 @@ namespace BER {
             }
         }
 
-        auto read(auto&& reader) const {
+        auto read(auto& reader) const {
             auto state = reader;
             auto result = type.read(reader);
             if (!result) {
+                // put back consumed bytes
                 reader = FWD(state);
             }
             return std::optional<decltype(result)>(FWD(result));
@@ -434,7 +440,7 @@ namespace BER {
 
     };
     constexpr auto optional(auto&& type) {
-        return Optional<decltype(type)>(FWD(type));
+        return Optional<std::decay_t<decltype(type)>>(FWD(type));
     }
 
     // template<typename ... Choices>

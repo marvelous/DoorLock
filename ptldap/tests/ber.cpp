@@ -124,16 +124,26 @@ TEST_CASE("primitives") {
 
 TEST_CASE("sequence") {
 
-    // auto bytes = "\x30\x06\x01\x01\xff\x02\x01\x42"sv;
-    // auto reader = Reader(Bytes::StringViewReader{bytes});
-    // auto sequence = TRY(reader.read_sequence());
-    // auto element1 = TRY(sequence.read_boolean());
-    // auto element2 = TRY(sequence.template read_integer<uint8_t>());
+    type_write(sequence(boolean), "\x30\x03\x01\x01\x00"sv, false);
+    type_write(sequence(boolean, boolean), "\x30\x06\x01\x01\x00\x01\x01\xff"sv, false, true);
+    type_write(sequence(boolean, integer), "\x30\x06\x01\x01\x00\x02\x01\x2a"sv, false, 42);
+    type_read(sequence(boolean), "\x30\x03\x01\x01\x00"sv, std::tuple(false));
+    type_read(sequence(boolean, boolean), "\x30\x06\x01\x01\x00\x01\x01\xff"sv, std::tuple(false, true));
+    type_read(sequence(boolean, integer), "\x30\x06\x01\x01\x00\x02\x01\x2a"sv, std::tuple(false, 42));
+    type_read_fail(sequence(boolean), "\x30\x02\x01\x01\x00"sv, "\x00"sv);
+    type_read_fail(sequence(boolean), "\x30\x04\x01\x01\x00"sv, "\x01\x01\x00"sv);
+    type_read_fail(sequence(boolean), "\x30\x04\x01\x01\x00\x00"sv);
 
-    // CHECK(element1 == true);
-    // CHECK(element2 == 0x42);
-    // check_bytes(sequence.bytes.string, ""sv);
-    // check_bytes(reader.bytes.string, ""sv);
+}
+
+TEST_CASE("sequence_of") {
+
+    type_write(sequence_of(boolean), "\x30\x03\x01\x01\x00"sv, false);
+    type_write(sequence_of(boolean), "\x30\x06\x01\x01\x00\x01\x01\xff"sv, false, true);
+    type_read(sequence_of(boolean), "\x30\x03\x01\x01\x00"sv, Bytes::StringViewReader{"\x01\x01\x00"sv});
+    type_read(sequence_of(boolean), "\x30\x02\x01\x01\x00"sv, Bytes::StringViewReader{"\x01\x01"sv}, "\x00"sv);
+    type_read_fail(sequence_of(boolean), "\x30\x04\x01\x01\x00"sv, "\x01\x01\x00"sv);
+    type_read(sequence_of(boolean), "\x30\x04\x01\x01\x00\x00"sv, Bytes::StringViewReader{"\x01\x01\x00\x00"sv});
 
 }
 
@@ -153,16 +163,5 @@ TEST_CASE("optional") {
     optional_read_fail(optional(boolean), "\x02\x01\x00"sv);
     type_write(optional(boolean), ""sv, std::nullopt);
     type_write(optional(boolean), "\x01\x01\x00"sv, false);
-
-}
-
-TEST_CASE("sequence_of") {
-
-    type_write(BER::sequence_of(boolean), "\x30\x03\x01\x01\x00"sv, false);
-    type_write(BER::sequence_of(boolean), "\x30\x06\x01\x01\x00\x01\x01\xff"sv, false, true);
-    type_read(BER::sequence_of(boolean), "\x30\x03\x01\x01\x00"sv, Bytes::StringViewReader{"\x01\x01\x00"sv});
-    type_read(BER::sequence_of(boolean), "\x30\x02\x01\x01\x00"sv, Bytes::StringViewReader{"\x01\x01"sv}, "\x00"sv);
-    type_read_fail(BER::sequence_of(boolean), "\x30\x04\x01\x01\x00"sv, "\x01\x01\x00"sv);
-    type_read(BER::sequence_of(boolean), "\x30\x04\x01\x01\x00\x00"sv, Bytes::StringViewReader{"\x01\x01\x00\x00"sv});
 
 }
