@@ -193,8 +193,11 @@ namespace BER {
 
     };
 
-    template<typename Identifier, typename Serde>
+    template<typename I, typename S>
     struct Type {
+
+        using Identifier = I;
+        using Serde = S;
 
         Identifier identifier;
         Serde serde;
@@ -236,7 +239,7 @@ namespace BER {
             auto length = OPT_TRY(Length::read(reader));
             OPT_REQUIRE(!length.is_indefinite());
 
-            auto bytes = Bytes::StringViewReader{OPT_TRY(reader.read(*length.length))};
+            auto bytes = OPT_TRY(reader.reader(*length.length));
             auto value = serde.read(bytes);
             OPT_REQUIRE(bytes.empty());
             return value;
@@ -258,7 +261,7 @@ namespace BER {
         }
 
         std::optional<bool> read(auto& reader) const {
-            return reader.read() != 0x00;
+            return OPT_TRY(reader.read()) != 0x00;
         }
 
     };
@@ -312,7 +315,7 @@ namespace BER {
         }
 
         std::optional<std::string_view> read(auto& reader) const {
-            return reader.read(reader.size());
+            return OPT_TRY(reader.read(reader.size()));
         }
 
     };
@@ -356,16 +359,16 @@ namespace BER {
         }
 
         auto read(auto& reader) const {
-            return read_elements<0, sizeof...(Types)>(reader);
+            return read_elements<0>(reader);
         }
-        template<size_t i, size_t max>
+        template<size_t i>
         auto read_elements(auto& reader, auto&&... values) const {
-            if constexpr (i < max) {
+            if constexpr (i < sizeof...(Types)) {
                 auto value = std::get<i>(types).read(reader);
                 if (!value) {
-                    return decltype(read_elements<i + 1, max>(reader, FWD(values)..., FWD(*value))){};
+                    return decltype(read_elements<i + 1>(reader, FWD(values)..., FWD(*value))){};
                 }
-                return read_elements<i + 1, max>(reader, FWD(values)..., FWD(*value));
+                return read_elements<i + 1>(reader, FWD(values)..., FWD(*value));
             } else {
                 return std::optional(std::tuple(FWD(values)...));
             }
@@ -393,10 +396,9 @@ namespace BER {
             }
         }
 
-        std::optional<Bytes::StringViewReader> read(auto& reader) const {
+        auto read(auto& reader) const -> decltype(reader.reader(0)) {
             auto size = reader.size();
-            auto bytes = OPT_TRY(FWD(reader).read(size));
-            return Bytes::StringViewReader{FWD(bytes)};
+            return OPT_TRY(reader.reader(size));
         }
 
     };
@@ -443,25 +445,58 @@ namespace BER {
         return Optional<std::decay_t<decltype(type)>>(FWD(type));
     }
 
-    // template<typename ... Choices>
-    // struct Choice {
+    template<typename Identifier, typename ... Types>
+    struct Choice {
 
-    //     struct Read {
+        std::tuple<Types...> types;
+        explicit constexpr Choice(auto&&... types): types(FWD(types)...) {}
 
-    //         TagNumber tag_number;
+        constexpr auto operator()(auto&& value) const {
+            return FWD(value);
+        }
 
-    //         template<typename T>
-    //         std::optional<typename T::Read> read() {
-    //             return std::nullopt;
-    //         }
+        template<typename ... Values>
+        struct Read {
+            using Value = typename std::variant<Values...>;
+            Identifier identifier;
+            Value value;
+        };
+        template<size_t i, typename ... Values>
+        auto read_choices(auto& reader, auto&& identifier) const {
+            if constexpr (i < sizeof...(Types)) {
+                auto& type = std::get<i>(types);
+                using Value = std::decay_t<decltype(*type.read(reader))>;
+                using Result = decltype(read_choices<i + 1, Values..., Value>(reader, identifier));
+                using Pair = typename Result::value_type;
+                using Variant = typename Pair::second_type;
+                if (identifier == type.identifier) {
+                    auto&& result = type.serde.read(reader);
+                    if (!result) {
+                        return Result(std::nullopt);
+                    }
+                    return Result({FWD(identifier), Variant(std::in_place_index_t<i>(), *FWD(result))});
+                } else {
+                    return read_choices<i + 1, Values..., Value>(reader, FWD(identifier));
+                }
+            } else {
+                return std::optional<std::pair<Identifier, std::variant<Values...>>>(std::nullopt);
+            }
+        }
+        auto read(auto& reader) const -> decltype(read_choices<0>(reader, *Identifier::read(reader))) {
+            auto&& identifier = OPT_TRY(Identifier::read(reader));
 
-    //     };
+            auto length = OPT_TRY(Length::read(reader));
+            OPT_REQUIRE(!length.is_indefinite());
 
-    //     std::variant<Choices...> value;
+            auto bytes = OPT_TRY(reader.reader(*length.length));
+            return read_choices<0>(bytes, FWD(identifier));
+        }
 
-    //     template<typename ... Args>
-    //     Choice(Args&&... args): value(FWD(args)...) {}
-
-    // };
+    };
+    // TODO: compute common TagNumber from types instead of typename
+    template<typename TagNumber = int>
+    constexpr auto choice(auto&&... types) {
+        return Choice<Identifier<TagNumber>, std::decay_t<decltype(types)>...>(FWD(types)...);
+    }
 
 }

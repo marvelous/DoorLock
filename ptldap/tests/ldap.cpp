@@ -14,7 +14,7 @@ TEST_CASE("ldap.com") {
 
         SECTION("write") {
             auto writer = Bytes::StringWriter();
-            // LDAP::Message(0x05, LDAP::ProtocolOp(LDAP::DelRequest("dc=example,dc=com"sv)), LDAP::Controls{LDAP::Control("1.2.840.113556.1.4.805"sv, true, std::nullopt)}).write(writer);
+            // LDAP::message(0x05, LDAP::del_request("dc=example,dc=com"sv), LDAP::controls{LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt)}).write(writer);
             // check_bytes(writer.string, bytes);
         }
 

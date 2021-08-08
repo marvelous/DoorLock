@@ -62,40 +62,46 @@ namespace LDAP {
 
     constexpr auto message_id = BER::integer;
 
-    // constexpr auto ldap_result = BER::sequence(
-    //     /*BER::enumerated<ResultCode>, */ldapdn, ldap_string, BER::optional(referral.context_specific(3)));
+    constexpr auto ldap_result = BER::sequence(
+        /*BER::enumerated<ResultCode>, */ldapdn, ldap_string, BER::optional(referral.context_specific(3)));
 
-    constexpr auto authentication_choice_simple = BER::octet_string.context_specific(0);
+    enum class AuthenticationChoice {
+        simple = 0,
+        sasl = 3,
+    };
+    constexpr auto authentication_choice = BER::choice(
+        BER::octet_string.context_specific(AuthenticationChoice::simple)
+    );
 
-    // constexpr auto bind_request = BER::sequence(
-    //     ldapoid, BER::boolean, BER::optional(BER::octet_string));
+    constexpr auto bind_request = BER::sequence(
+        BER::integer, ldapdn, authentication_choice).application(0);
 
-    // constexpr auto control = BER::sequence(
-    //     ldapoid, BER::boolean, BER::optional(BER::octet_string));
+    constexpr auto control = BER::sequence(
+        ldapoid, BER::boolean, BER::optional(BER::octet_string));
 
-    // constexpr auto controls = BER::sequence_of(control);
+    constexpr auto controls = BER::sequence_of(control);
 
-    // constexpr auto message = BER::sequence(
-    //     message_id, bind_request, BER::optional(controls));
+    constexpr auto message = BER::sequence(
+        message_id, bind_request, BER::optional(controls));
 
-    // constexpr auto compare_response = ldap_result.application(15);
+    constexpr auto compare_response = ldap_result.application(15);
 
     constexpr auto abandon_request = message_id.application(16);
 
-    // constexpr auto extended_request = BER::sequence(
-    //     ldapoid.context_specific(0),
-    //     BER::optional(BER::octet_string.context_specific(1))
-    // ).template application(23);
+    constexpr auto extended_request = BER::sequence(
+        ldapoid.context_specific(0),
+        BER::optional(BER::octet_string.context_specific(1))
+    ).template application(23);
 
-    // constexpr auto extended_response = BER::sequence(
-    //     // TODO: COMPONENTS OF LDAPResult,
-    //     BER::optional(ldapoid.context_specific(10)),
-    //     BER::optional(BER::octet_string.context_specific(11))
-    // ).application(24);
+    constexpr auto extended_response = BER::sequence(
+        // TODO: COMPONENTS OF LDAPResult,
+        BER::optional(ldapoid.context_specific(10)),
+        BER::optional(BER::octet_string.context_specific(11))
+    ).application(24);
 
-    // constexpr auto intermediate_response = BER::sequence(
-    //     BER::optional(ldapoid.context_specific(0)),
-    //     BER::optional(BER::octet_string.context_specific(1))
-    // ).application(25);
+    constexpr auto intermediate_response = BER::sequence(
+        BER::optional(ldapoid.context_specific(0)),
+        BER::optional(BER::octet_string.context_specific(1))
+    ).application(25);
 
 }

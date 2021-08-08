@@ -165,3 +165,25 @@ TEST_CASE("optional") {
     type_write(optional(boolean), "\x01\x01\x00"sv, false);
 
 }
+
+TEST_CASE("choice") {
+
+    type_write(choice(boolean, integer), "\x01\x01\x00"sv, boolean(false));
+    type_read(choice(boolean, integer), "\x01\x01\x00"sv, std::pair(boolean.identifier, std::variant<bool, int>(false)));
+
+    enum class Enum {
+        Bool = 1,
+        Int1 = 2,
+        Int2 = 3,
+    };
+    auto type = choice<Enum>(
+        boolean.context_specific(Enum::Bool),
+        integer.context_specific(Enum::Int1),
+        integer.context_specific(Enum::Int2)
+    );
+    using Variant = std::variant<bool, int, int>;
+    type_read(type, "\x81\x01\xff"sv, std::pair(std::get<0>(type.types).identifier, Variant(std::in_place_index_t<0>(), true)));
+    type_read(type, "\x82\x01\x2a"sv, std::pair(std::get<1>(type.types).identifier, Variant(std::in_place_index_t<1>(), 42)));
+    type_read(type, "\x83\x01\x2a"sv, std::pair(std::get<2>(type.types).identifier, Variant(std::in_place_index_t<2>(), 42)));
+
+}
