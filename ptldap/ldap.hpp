@@ -93,9 +93,8 @@ namespace LDAP {
         Simple = 0,
         Sasl = 3,
     };
-    constexpr auto authentication_choice = BER::choice<AuthenticationChoice>(
-        BER::octet_string.context_specific(AuthenticationChoice::Simple)
-    );
+    constexpr auto authentication_choice = BER::choice<AuthenticationChoice>()
+        .with<AuthenticationChoice::Simple>(BER::octet_string);
     constexpr auto bind_request = BER::sequence(
         BER::integer, ldapdn, authentication_choice).application(0);
 
@@ -128,10 +127,8 @@ namespace LDAP {
 
     constexpr auto message = BER::sequence(
         message_id,
-        BER::choice<ProtocolOp>(
-            del_request
-
-        ),
+        BER::choice<ProtocolOp>()
+            .with<ProtocolOp::DelRequest>(del_request),
         BER::optional(controls)
     );
 
