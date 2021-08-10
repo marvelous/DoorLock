@@ -14,29 +14,28 @@ TEST_CASE("ldap.com") {
 
         SECTION("write") {
             auto writer = Bytes::StringWriter();
-            // LDAP::message(0x05, LDAP::del_request("dc=example,dc=com"sv), LDAP::controls{LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt)}).write(writer);
-            // check_bytes(writer.string, bytes);
+            LDAP::message(0x05, LDAP::del_request("dc=example,dc=com"sv), LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt))).write(writer);
+            check_bytes(writer.string, bytes);
         }
 
         SECTION("read") {
             auto reader = Bytes::StringViewReader{bytes};
 
-            // auto [message_id, protocol_op, controls_opt] = TRY(LDAP::Message.read(reader));
-            // CHECK(message_id == 0x05);
-            // CHECK(protocol_op.tag_number == LDAP::TagNumber::DelRequest);
+            auto [message_id, protocol_op, controls_opt] = TRY(LDAP::message.read(reader));
+            CHECK(message_id == 0x05);
+            CHECK(protocol_op.first.tag_number == LDAP::ProtocolOp::DelRequest);
 
             // auto del_request = TRY(LDAP::DelRequest.read(protocol_op));
             // CHECK(del_request == "dc=example,dc=com"sv);
 
-            // auto controls = TRY(controls_opt);
-            // auto [control_type, criticality, control_value] = TRY(controls.read());
-            // CHECK(control_type == "1.2.840.113556.1.4.805"sv);
-            // CHECK(criticality == true);
-            // CHECK(control_value == nullopt);
+            auto controls = TRY(controls_opt);
+            auto [control_type, criticality, control_value] = TRY(LDAP::control.read(controls));
+            CHECK(control_type == "1.2.840.113556.1.4.805"sv);
+            CHECK(criticality == true);
+            CHECK(control_value == nullopt);
 
-            // check_bytes(controls.bytes.string, ""sv);
-            // check_bytes(message.bytes.string, ""sv);
-            // check_bytes(reader.bytes.string, ""sv);
+            check_bytes(controls.string, ""sv);
+            check_bytes(reader.string, ""sv);
         }
 
     }
@@ -47,8 +46,8 @@ TEST_CASE("ldap.com") {
 
         SECTION("write") {
             auto writer = Bytes::StringWriter();
-            // LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice_simple("secret123"sv)), LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt))).write(writer);
-            // check_bytes(writer.bytes.string, bytes);
+            // LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice.make<LDAP::AuthenticationChoice::Simple>("secret123"sv)), LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt))).write(writer);
+            check_bytes(writer.string, bytes);
         }
 
         SECTION("read") {

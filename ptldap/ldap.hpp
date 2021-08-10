@@ -50,6 +50,30 @@ namespace LDAP {
         Other = 80
     };
 
+    enum class ProtocolOp {
+        BindRequest = 0,
+        BindResponse = 1,
+        UnbindRequest = 2,
+        SearchRequest = 3,
+        SearchResultEntry = 4,
+        SearchResultDone = 5,
+        SearchResultReference = 19,
+        ModifyRequest = 6,
+        ModifyResponse = 7,
+        AddRequest = 8,
+        AddResponse = 9,
+        DelRequest = 10,
+        DelResponse = 11,
+        ModifyDNRequest = 12,
+        ModifyDNResponse = 13,
+        CompareRequest = 14,
+        CompareResponse = 15,
+        AbandonRequest = 16,
+        ExtendedRequest = 23,
+        ExtendedResponse = 24,
+        IntermediateResponse = 25
+    };
+
     constexpr auto ldapoid = BER::octet_string;
 
     constexpr auto ldapdn = BER::octet_string;
@@ -66,42 +90,49 @@ namespace LDAP {
         /*BER::enumerated<ResultCode>, */ldapdn, ldap_string, BER::optional(referral.context_specific(3)));
 
     enum class AuthenticationChoice {
-        simple = 0,
-        sasl = 3,
+        Simple = 0,
+        Sasl = 3,
     };
-    constexpr auto authentication_choice = BER::choice(
-        BER::octet_string.context_specific(AuthenticationChoice::simple)
+    constexpr auto authentication_choice = BER::choice<AuthenticationChoice>(
+        BER::octet_string.context_specific(AuthenticationChoice::Simple)
     );
-
     constexpr auto bind_request = BER::sequence(
         BER::integer, ldapdn, authentication_choice).application(0);
 
     constexpr auto control = BER::sequence(
         ldapoid, BER::boolean, BER::optional(BER::octet_string));
 
-    constexpr auto controls = BER::sequence_of(control);
+    constexpr auto controls = BER::sequence_of(control).context_specific(0);
 
-    constexpr auto message = BER::sequence(
-        message_id, bind_request, BER::optional(controls));
+    constexpr auto del_request = ldapdn.application(ProtocolOp::DelRequest);
 
-    constexpr auto compare_response = ldap_result.application(15);
+    constexpr auto compare_response = ldap_result.application(ProtocolOp::CompareResponse);
 
-    constexpr auto abandon_request = message_id.application(16);
+    constexpr auto abandon_request = message_id.application(ProtocolOp::AbandonRequest);
 
     constexpr auto extended_request = BER::sequence(
         ldapoid.context_specific(0),
         BER::optional(BER::octet_string.context_specific(1))
-    ).template application(23);
+    ).template application(ProtocolOp::ExtendedRequest);
 
     constexpr auto extended_response = BER::sequence(
         // TODO: COMPONENTS OF LDAPResult,
         BER::optional(ldapoid.context_specific(10)),
         BER::optional(BER::octet_string.context_specific(11))
-    ).application(24);
+    ).application(ProtocolOp::ExtendedResponse);
 
     constexpr auto intermediate_response = BER::sequence(
         BER::optional(ldapoid.context_specific(0)),
         BER::optional(BER::octet_string.context_specific(1))
-    ).application(25);
+    ).application(ProtocolOp::IntermediateResponse);
+
+    constexpr auto message = BER::sequence(
+        message_id,
+        BER::choice<ProtocolOp>(
+            del_request
+
+        ),
+        BER::optional(controls)
+    );
 
 }

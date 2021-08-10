@@ -53,9 +53,10 @@ namespace BER {
         return bits;
     }
 
-    template<typename TagNumber>
+    template<typename N>
     struct Identifier {
 
+        using TagNumber = N;
         static constexpr auto extended_type = 0x1F;
 
         Encoding encoding;
@@ -218,6 +219,10 @@ namespace BER {
             return tagged(TagClass::Application, tag_number);
         }
 
+        template<typename Value>
+        constexpr auto operator()(const BER::Writable<Type, Value>& writable) const {
+            return writable;
+        }
         constexpr auto operator()(auto&&... args) const {
             return BER::Writable(*this, serde(FWD(args)...));
         }
@@ -346,6 +351,7 @@ namespace BER {
             types(FWD(types)...) {}
 
         auto operator()(auto&&... args) const {
+            static_assert(sizeof...(Types) == sizeof...(args));
             return std::tuple(FWD(args)...);
         }
 
@@ -445,12 +451,18 @@ namespace BER {
         return Optional<std::decay_t<decltype(type)>>(FWD(type));
     }
 
-    template<typename Identifier, typename ... Types>
+    template<typename TagNumber, typename ... Types>
     struct Choice {
 
         std::tuple<Types...> types;
         explicit constexpr Choice(auto&&... types): types(FWD(types)...) {}
 
+        template<TagNumber tag_number>
+        constexpr auto make(auto&&... values) const {
+            if constexpr (tag_number == std::get<0>(types).identifier.tag_number) {
+                
+            }
+        }
         constexpr auto operator()(auto&& value) const {
             return FWD(value);
         }
@@ -458,7 +470,7 @@ namespace BER {
         template<typename ... Values>
         struct Read {
             using Value = typename std::variant<Values...>;
-            Identifier identifier;
+            Identifier<TagNumber> identifier;
             Value value;
         };
         template<size_t i, typename ... Values>
@@ -479,11 +491,11 @@ namespace BER {
                     return read_choices<i + 1, Values..., Value>(reader, FWD(identifier));
                 }
             } else {
-                return std::optional<std::pair<Identifier, std::variant<Values...>>>(std::nullopt);
+                return std::optional<std::pair<Identifier<TagNumber>, std::variant<Values...>>>(std::nullopt);
             }
         }
-        auto read(auto& reader) const -> decltype(read_choices<0>(reader, *Identifier::read(reader))) {
-            auto&& identifier = OPT_TRY(Identifier::read(reader));
+        auto read(auto& reader) const -> decltype(read_choices<0>(reader, *Identifier<TagNumber>::read(reader))) {
+            auto&& identifier = OPT_TRY(Identifier<TagNumber>::read(reader));
 
             auto length = OPT_TRY(Length::read(reader));
             OPT_REQUIRE(!length.is_indefinite());
@@ -496,7 +508,7 @@ namespace BER {
     // TODO: compute common TagNumber from types instead of typename
     template<typename TagNumber = int>
     constexpr auto choice(auto&&... types) {
-        return Choice<Identifier<TagNumber>, std::decay_t<decltype(types)>...>(FWD(types)...);
+        return Choice<TagNumber, std::decay_t<decltype(types)>...>(FWD(types)...);
     }
 
 }
