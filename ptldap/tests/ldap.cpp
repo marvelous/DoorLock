@@ -46,7 +46,7 @@ TEST_CASE("ldap.com") {
 
         SECTION("write") {
             auto writer = Bytes::StringWriter();
-            // LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice.make<LDAP::AuthenticationChoice::Simple>("secret123"sv)), LDAP::controls(LDAP::control("1.2.840.113556.1.4.805"sv, true, std::nullopt))).write(writer);
+            LDAP::message(0x01, LDAP::bind_request(3, "uid=jdoe,ou=People,dc=example,dc=com"sv, LDAP::authentication_choice.make<LDAP::AuthenticationChoice::Simple>("secret123"sv)), std::nullopt).write(writer);
             check_bytes(writer.string, bytes);
         }
 

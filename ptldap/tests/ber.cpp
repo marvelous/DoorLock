@@ -166,11 +166,18 @@ TEST_CASE("optional") {
 
 }
 
+template<auto tag_number>
+auto read_result(auto const& type, auto&& value) {
+    using Read = std::decay_t<decltype(*type.read(std::declval<Bytes::StringViewReader&>()))>;
+    constexpr auto i = std::decay_t<decltype(type)>::template index_of<tag_number>();
+    return Read::template indexed<i>(FWD(value));
+}
 TEST_CASE("choice") {
 
     SECTION("int") {
-        auto type = choice().with<0>(boolean).with<1>(integer);
-        // type_write_read(type, "\x01\x01\x00"sv, type.make<0>(false));
+        auto type = choice().with<5>(boolean).with<7>(integer);
+        type_write(type, "\x85\x01\x00"sv, type.make<5>(false));
+        type_read(type, "\x85\x01\x00"sv, read_result<5>(type, false));
     }
 
     SECTION("enum") {
@@ -183,13 +190,19 @@ TEST_CASE("choice") {
             .with<Enum::Bool>(boolean)
             .with<Enum::Int1>(integer)
             .with<Enum::Int2>(integer);
-        // using Variant = std::variant<bool, int, int>;
-        // type_write(type, "\x81\x01\xff"sv, type.make<Enum::Bool>(true));
-        // type_write(type, "\x82\x01\x2a"sv, type.make<Enum::Int1>(42));
-        // type_write(type, "\x83\x01\x2a"sv, type.make<Enum::Int2>(42));
-        // type_read(type, "\x81\x01\xff"sv, std::pair(std::get<0>(type.types).identifier, Variant(std::in_place_index_t<0>(), true)));
-        // type_read(type, "\x82\x01\x2a"sv, std::pair(std::get<1>(type.types).identifier, Variant(std::in_place_index_t<1>(), 42)));
-        // type_read(type, "\x83\x01\x2a"sv, std::pair(std::get<2>(type.types).identifier, Variant(std::in_place_index_t<2>(), 42)));
+        type_write(type, "\x81\x01\xff"sv, type.make<Enum::Bool>(true));
+        type_write(type, "\x82\x01\x2a"sv, type.make<Enum::Int1>(42));
+        type_write(type, "\x83\x01\x2a"sv, type.make<Enum::Int2>(42));
+        type_read(type, "\x81\x01\xff"sv, read_result<Enum::Bool>(type, true));
+        type_read(type, "\x82\x01\x2a"sv, read_result<Enum::Int1>(type, 42));
+        type_read(type, "\x83\x01\x2a"sv, read_result<Enum::Int2>(type, 42));
+    }
+
+    SECTION("read") {
+        auto type = choice().with<5>(octet_string).with<7>(integer);
+        auto read = read_result<7>(type, 42);
+        CHECK(read.tag_number == 7);
+        CHECK(read.get<7>() == 42);
     }
 
 }

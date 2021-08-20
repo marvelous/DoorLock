@@ -220,11 +220,11 @@ namespace BER {
         }
 
         template<typename Value>
-        constexpr auto operator()(const BER::Writable<Type, Value>& writable) const {
+        constexpr auto operator()(const Writable<Type, Value>& writable) const {
             return writable;
         }
         constexpr auto operator()(auto&&... args) const {
-            return BER::Writable(*this, serde(FWD(args)...));
+            return Writable(*this, serde(FWD(args)...));
         }
 
         void write(auto& writer, auto& value) const {
@@ -459,54 +459,92 @@ namespace BER {
 
         template<TagNumber tag_number>
         constexpr auto with(auto&& type) {
-            auto types = std::tuple_cat(this->types, std::tuple(FWD(type)));
+            auto types = std::tuple_cat(this->types, std::tuple(FWD(type).context_specific(tag_number)));
             return Choice<TagNumber, decltype(types), tag_numbers..., tag_number>(std::move(types));
+        }
+
+        template<size_t i>
+        static constexpr auto tag_number() {
+            return std::array{tag_numbers...}[i];
+        }
+
+        template<TagNumber tag_number, size_t i = 0>
+        static constexpr auto index_of() {
+            static_assert(i < sizeof...(tag_numbers), "tag number not found among choices");
+            if constexpr (tag_number == Choice::tag_number<i>()) {
+                return i;
+            } else if constexpr (i < sizeof...(tag_numbers)) {
+                return index_of<tag_number, i + 1>();
+            }
+        }
+
+        template<TagNumber tag_number>
+        constexpr auto&& type() const {
+            return std::get<index_of<tag_number>()>(types);
+        }
+
+        template<TagNumber tag_number>
+        constexpr auto make(auto&&... args) const {
+            return type<tag_number>()(FWD(args)...);
         }
 
         constexpr auto operator()(auto&& value) const {
             return FWD(value);
         }
 
-        // template<typename ... Values>
-        // struct Read {
-        //     using Value = typename std::variant<Values...>;
-        //     Identifier<TagNumber> identifier;
-        //     Value value;
-        // };
-        // template<size_t i, typename ... Values>
-        // auto read_choices(auto& reader, auto&& identifier) const {
-        //     if constexpr (i < sizeof...(Types)) {
-        //         auto& type = std::get<i>(types);
-        //         using Value = std::decay_t<decltype(*type.read(reader))>;
-        //         using Result = decltype(read_choices<i + 1, Values..., Value>(reader, identifier));
-        //         using Pair = typename Result::value_type;
-        //         using Variant = typename Pair::second_type;
-        //         if (identifier == type.identifier) {
-        //             auto&& result = type.serde.read(reader);
-        //             if (!result) {
-        //                 return Result(std::nullopt);
-        //             }
-        //             return Result({FWD(identifier), Variant(std::in_place_index_t<i>(), *FWD(result))});
-        //         } else {
-        //             return read_choices<i + 1, Values..., Value>(reader, FWD(identifier));
-        //         }
-        //     } else {
-        //         return std::optional<std::pair<Identifier<TagNumber>, std::variant<Values...>>>(std::nullopt);
-        //     }
-        // }
-        // auto read(auto& reader) const -> decltype(read_choices<0>(reader, *Identifier<TagNumber>::read(reader))) {
-        //     auto&& identifier = OPT_TRY(Identifier<TagNumber>::read(reader));
+        template<typename ... Values>
+        struct Read {
+            using Variant = typename std::variant<Values...>;
+            TagNumber tag_number;
+            Variant value;
 
-        //     auto length = OPT_TRY(Length::read(reader));
-        //     OPT_REQUIRE(!length.is_indefinite());
+            template<size_t i>
+            static auto indexed(auto&& value) {
+                return Read{Choice::tag_number<i>(), Variant(std::in_place_index_t<i>(), FWD(value))};
+            }
 
-        //     auto bytes = OPT_TRY(reader.reader(*length.length));
-        //     return read_choices<0>(bytes, FWD(identifier));
-        // }
+            bool operator==(Read const& that) const {
+                return this->tag_number == that.tag_number && this->value == that.value;
+            }
+
+            template<TagNumber tag_number>
+            auto&& get() const {
+                return std::get<index_of<tag_number>()>(value);
+            }
+        };
+        template<size_t i, typename ... Values>
+        auto read_choices(auto& reader, auto&& identifier) const {
+            if constexpr (i < sizeof...(tag_numbers)) {
+                auto& type = std::get<i>(types);
+                using Value = std::decay_t<decltype(*type.read(reader))>;
+                using Result = decltype(read_choices<i + 1, Values..., Value>(reader, identifier));
+                using Read = typename Result::value_type;
+                if (identifier == type.identifier) {
+                    auto&& result = type.serde.read(reader);
+                    if (!result) {
+                        return Result(std::nullopt);
+                    }
+                    return Result(Read::template indexed<i>(*FWD(result)));
+                } else {
+                    return read_choices<i + 1, Values..., Value>(reader, FWD(identifier));
+                }
+            } else {
+                return std::optional<Read<Values...>>(std::nullopt);
+            }
+        }
+        auto read(auto& reader) const -> decltype(read_choices<0>(reader, *Identifier<TagNumber>::read(reader))) {
+            auto&& identifier = OPT_TRY(Identifier<TagNumber>::read(reader));
+
+            auto length = OPT_TRY(Length::read(reader));
+            OPT_REQUIRE(!length.is_indefinite());
+
+            auto bytes = OPT_TRY(reader.reader(*length.length));
+            return read_choices<0>(bytes, FWD(identifier));
+        }
 
     };
     template<typename TagNumber = int>
-    constexpr auto choice() {
+    constexpr auto choice(TagClass tag_class = TagClass::ContextSpecific) {
         auto types = std::tuple();
         return Choice<TagNumber, decltype(types)>(std::move(types));
     }
