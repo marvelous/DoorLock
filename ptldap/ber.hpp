@@ -349,6 +349,30 @@ namespace BER {
     };
     constexpr auto null = type(Encoding::Primitive, 5, Null());
 
+    template<typename Enum>
+    struct Enumerated {
+
+        using Integral = std::underlying_type_t<Enum>;
+        Integer<Integral> integer;
+
+        auto operator()(auto&& value) const {
+            return FWD(value);
+        }
+
+        void write(auto& writer, auto const& value) const {
+            integer.write(writer, Integral(value));
+        }
+
+        std::optional<Enum> read(auto& reader) const {
+            return Enum(OPT_TRY(integer.read(reader)));
+        }
+
+    };
+    template<typename Enum>
+    constexpr auto enumerated() {
+        return type(Encoding::Primitive, 10, Enumerated<Enum>());
+    }
+
     template<typename ... Types>
     struct Sequence {
 
