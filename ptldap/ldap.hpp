@@ -87,7 +87,7 @@ namespace LDAP {
     constexpr auto message_id = BER::integer;
 
     constexpr auto ldap_result = BER::sequence(
-        /*BER::enumerated<ResultCode>, */ldapdn, ldap_string, BER::optional(referral.context_specific(3)));
+        BER::enumerated<ResultCode>(), ldapdn, ldap_string, BER::optional(referral.context_specific(3)));
 
     enum class AuthenticationChoice {
         Simple = 0,
@@ -97,6 +97,88 @@ namespace LDAP {
         .with<AuthenticationChoice::Simple>(BER::octet_string);
     constexpr auto bind_request = BER::sequence(
         BER::integer, ldapdn, authentication_choice).application(ProtocolOp::BindRequest);
+
+    constexpr auto matching_rule_id = ldap_string;
+    constexpr auto attribute_description = ldap_string;
+    constexpr auto assertion_value = BER::octet_string;
+    constexpr auto attribute_value_assertion = BER::sequence(
+        attribute_description, assertion_value);
+    constexpr auto matching_rule_assertion = BER::sequence(
+        BER::optional(matching_rule_id.context_specific(1)),
+        BER::optional(attribute_description.context_specific(2)),
+        assertion_value.context_specific(3),
+        BER::boolean.context_specific(4)
+    );
+
+    enum class SubstringFilterSubstrings {
+        Initial = 0,
+        Any = 1,
+        Final = 2,
+    };
+    constexpr auto substring_filter = BER::sequence(
+        attribute_description, BER::sequence_of(
+            BER::choice<SubstringFilterSubstrings>()
+                .with<SubstringFilterSubstrings::Initial>(assertion_value)
+                .with<SubstringFilterSubstrings::Any>(assertion_value)
+                .with<SubstringFilterSubstrings::Final>(assertion_value)
+        )
+    );
+
+    enum class Filter {
+        And = 0,
+        Or = 1,
+        Not = 2,
+        EqualityMatch = 3,
+        Substrings = 4,
+        GreaterOrEqual = 5,
+        LessOrEqual = 6,
+        Present = 7,
+        ApproxMatch = 8,
+        ExtensibleMatch = 9,
+    };
+    constexpr auto filter0 = BER::choice<Filter>()
+        .with<Filter::EqualityMatch>(attribute_value_assertion)
+        .with<Filter::Substrings>(substring_filter)
+        .with<Filter::GreaterOrEqual>(attribute_value_assertion)
+        .with<Filter::LessOrEqual>(attribute_value_assertion)
+        .with<Filter::Present>(attribute_description)
+        .with<Filter::ApproxMatch>(attribute_value_assertion)
+        .with<Filter::ExtensibleMatch>(matching_rule_assertion);
+    constexpr auto filter = BER::choice<Filter>()
+        .with<Filter::And>(BER::set_of(filter0))
+        .with<Filter::Or>(BER::set_of(filter0))
+        // .with<Filter::Not>(filter0)
+        .with<Filter::EqualityMatch>(attribute_value_assertion)
+        .with<Filter::Substrings>(substring_filter)
+        .with<Filter::GreaterOrEqual>(attribute_value_assertion)
+        .with<Filter::LessOrEqual>(attribute_value_assertion)
+        .with<Filter::Present>(attribute_description)
+        .with<Filter::ApproxMatch>(attribute_value_assertion)
+        .with<Filter::ExtensibleMatch>(matching_rule_assertion);
+
+    constexpr auto attribute_selection = BER::sequence_of(ldap_string);
+
+    enum class SearchRequestScope {
+        BaseObject = 0,
+        SingleLevel = 1,
+        WholeSubtree = 2,
+    };
+    enum class SearchRequestDerefAliases {
+        NeverDerefAliases = 0,
+        DerefInSearching = 1,
+        DerefFindingBaseObj = 2,
+        DerefAlways = 3,
+    };
+    constexpr auto search_request = BER::sequence(
+        ldapdn,
+        BER::enumerated<SearchRequestScope>(),
+        BER::enumerated<SearchRequestDerefAliases>(),
+        BER::integer,
+        BER::integer,
+        BER::boolean,
+        filter,
+        attribute_selection
+    ).application(ProtocolOp::SearchRequest);
 
     constexpr auto control = BER::sequence(
         ldapoid, BER::boolean, BER::optional(BER::octet_string));
@@ -129,6 +211,7 @@ namespace LDAP {
         message_id,
         BER::choice<ProtocolOp>()
             .with<ProtocolOp::BindRequest>(bind_request)
+            .with<ProtocolOp::SearchRequest>(search_request)
             .with<ProtocolOp::DelRequest>(del_request),
         BER::optional(controls)
     );

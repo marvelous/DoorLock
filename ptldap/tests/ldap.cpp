@@ -33,8 +33,8 @@ TEST_CASE("ldap.com") {
             CHECK(control_type == "1.2.840.113556.1.4.805"sv);
             CHECK(criticality == true);
             CHECK(control_value == nullopt);
-
             check_bytes(controls.string, ""sv);
+
             check_bytes(reader.string, ""sv);
         }
 
@@ -78,12 +78,70 @@ TEST_CASE("ldap.com") {
 
         SECTION("write") {
             auto writer = Bytes::StringWriter();
-            // LDAP::Message(0x02, LDAP::SearchRequest<int>{"dc=example,dc=com"sv, LDAP::Scope::WholeSubtree, LDAP::DerefAliases::NeverDerefAliases, 1000, 30, false, LDAP::Filter::and_(LDAP::Filter::equalityMatch("objectClass"sv, "person"sv), LDAP::Filter::equalityMatch("uid"sv, "joe"sv)), {"*"sv, "+"sv}}).write(writer);
-            // check_bytes(writer.bytes.string, bytes);
+            LDAP::message(
+                0x02,
+                LDAP::search_request(
+                    "dc=example,dc=com"sv,
+                    LDAP::SearchRequestScope::WholeSubtree,
+                    LDAP::SearchRequestDerefAliases::NeverDerefAliases,
+                    1000, 30, false,
+                    LDAP::filter.make<LDAP::Filter::And>(
+                        LDAP::filter.make<LDAP::Filter::EqualityMatch>(
+                            "objectClass"sv,
+                            "person"sv
+                        ),
+                        LDAP::filter.make<LDAP::Filter::EqualityMatch>(
+                            "uid"sv,
+                            "jdoe"sv
+                        )
+                    ),
+                    LDAP::attribute_selection("*"sv, "+"sv)
+                ),
+                std::nullopt
+            ).write(writer);
+            check_bytes(writer.string, bytes);
         }
 
         SECTION("read") {
-            // TODO
+            auto reader = Bytes::StringViewReader{bytes};
+
+            auto [message_id, protocol_op, controls_opt] = TRY(LDAP::message.read(reader));
+            CHECK(message_id == 0x02);
+            CHECK(protocol_op.tag_number == LDAP::ProtocolOp::SearchRequest);
+
+            auto [base_object, scope, deref_aliases, size_limit, time_limit, types_only, filter, attributes] = protocol_op.get<LDAP::ProtocolOp::SearchRequest>();
+            CHECK(base_object == "dc=example,dc=com"sv);
+            CHECK(scope == LDAP::SearchRequestScope::WholeSubtree);
+            CHECK(deref_aliases == LDAP::SearchRequestDerefAliases::NeverDerefAliases);
+            CHECK(size_limit == 1000);
+            CHECK(time_limit == 30);
+            CHECK(types_only == false);
+
+            CHECK(filter.tag_number == LDAP::Filter::And);
+            auto and_ = filter.get<LDAP::Filter::And>();
+            {
+                auto filter = TRY(LDAP::filter.read(and_));
+                CHECK(filter.tag_number == LDAP::Filter::EqualityMatch);
+                auto [attribute_description, assertion_value] = filter.get<LDAP::Filter::EqualityMatch>();
+                CHECK(attribute_description == "objectClass"sv);
+                CHECK(assertion_value == "person"sv);
+            }
+            {
+                auto filter = TRY(LDAP::filter.read(and_));
+                CHECK(filter.tag_number == LDAP::Filter::EqualityMatch);
+                auto [attribute_description, assertion_value] = filter.get<LDAP::Filter::EqualityMatch>();
+                CHECK(attribute_description == "uid"sv);
+                CHECK(assertion_value == "jdoe"sv);
+            }
+            check_bytes(and_.string, ""sv);
+
+            CHECK(TRY(LDAP::ldap_string.read(attributes)) == "*"sv);
+            CHECK(TRY(LDAP::ldap_string.read(attributes)) == "+"sv);
+            check_bytes(attributes.string, ""sv);
+
+            CHECK(controls_opt == std::nullopt);
+
+            check_bytes(reader.string, ""sv);
         }
 
     };

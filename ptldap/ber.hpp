@@ -441,6 +441,9 @@ namespace BER {
     constexpr auto sequence_of(auto&& type) {
         return BER::type(Encoding::Constructed, 0x10, SequenceOf<std::decay_t<decltype(type)>>(FWD(type)));
     }
+    constexpr auto set_of(auto&& type) {
+        return BER::type(Encoding::Constructed, 0x11, SequenceOf<std::decay_t<decltype(type)>>(FWD(type)));
+    }
 
     template<typename Type>
     struct Optional {
