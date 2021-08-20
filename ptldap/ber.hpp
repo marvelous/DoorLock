@@ -211,6 +211,12 @@ namespace BER {
             return BER::Type(BER::Identifier(identifier.encoding, tag_class, tag_number), serde);
         }
 
+        constexpr auto tagged(auto tag_number) const {
+            auto tag_class = identifier.tag_class;
+            if (tag_class == TagClass::Universal) tag_class = TagClass::ContextSpecific;
+            return tagged(tag_class, tag_number);
+        }
+
         constexpr auto context_specific(auto tag_number) const {
             return tagged(TagClass::ContextSpecific, tag_number);
         }
@@ -459,7 +465,7 @@ namespace BER {
 
         template<TagNumber tag_number>
         constexpr auto with(auto&& type) {
-            auto types = std::tuple_cat(this->types, std::tuple(FWD(type).context_specific(tag_number)));
+            auto types = std::tuple_cat(this->types, std::tuple(FWD(type).tagged(tag_number)));
             return Choice<TagNumber, decltype(types), tag_numbers..., tag_number>(std::move(types));
         }
 
@@ -544,7 +550,7 @@ namespace BER {
 
     };
     template<typename TagNumber = int>
-    constexpr auto choice(TagClass tag_class = TagClass::ContextSpecific) {
+    constexpr auto choice() {
         auto types = std::tuple();
         return Choice<TagNumber, decltype(types)>(std::move(types));
     }
