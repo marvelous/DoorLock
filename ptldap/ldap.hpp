@@ -107,7 +107,7 @@ namespace LDAP {
         BER::optional(matching_rule_id.context_specific(1)),
         BER::optional(attribute_description.context_specific(2)),
         assertion_value.context_specific(3),
-        BER::boolean.context_specific(4)
+        BER::optional(BER::boolean.context_specific(4))
     );
 
     enum class SubstringFilterSubstrings {

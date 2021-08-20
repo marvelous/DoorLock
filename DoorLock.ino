@@ -34,6 +34,8 @@ const char* ldap_member_group = "ou=Members,dc=DoorLockDC";
 */
 #include "login.h"
 
+using std::literals::string_view_literals::operator""sv;
+
 void setup() {
   Serial.begin(115200);
 
@@ -127,7 +129,9 @@ void loop() {
   // This will send a string to the server
   Serial.println("Connecting to LDAP");
   if (client.connected()) {
-    auto req = LDAP::BindRequest(ldap_login, ldap_passwd).str();
+    auto writer = Bytes::StringWriter();
+    LDAP::message(1, LDAP::bind_request(3, ldap_login, LDAP::authentication_choice.make<LDAP::AuthenticationChoice::Simple>(ldap_passwd)), std::nullopt).write(writer);
+    auto req = std::move(writer.string);
     Serial.println("> BindRequest");
     for(int i = 0; i < req.length(); i++) {
       if (req.c_str()[i] < 0x10) {
@@ -168,10 +172,27 @@ void loop() {
   // TODO: add a filter for ptl-active group
   Serial.println("sending data to server");
   if (client.connected()) {
-    auto req = LDAP::SearchRequest(ldap_member_group,
-                                   "badgenuid",
-                                   badgenuidstr,
-                                   "cn").str();
+    auto writer = Bytes::StringWriter();
+    LDAP::message(
+      2,
+      LDAP::search_request(
+        ldap_member_group,
+        LDAP::SearchRequestScope::SingleLevel,
+        LDAP::SearchRequestDerefAliases::NeverDerefAliases,
+        0,
+        0,
+        false,
+        LDAP::filter.make<LDAP::Filter::ExtensibleMatch>(
+          std::nullopt,
+          "badgenuid"sv,
+          std::string_view(badgenuidstr),
+          std::nullopt
+        ),
+        LDAP::attribute_selection("cn"sv)
+      ),
+      std::nullopt
+    ).write(writer);
+    auto req = std::move(writer.string);
     Serial.println(">SearchRequest");
     for(int i = 0; i < req.length(); i++) {
       if (req.c_str()[i] < 0x10) {
