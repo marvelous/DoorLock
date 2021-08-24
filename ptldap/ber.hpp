@@ -261,6 +261,30 @@ namespace BER {
         return Type(Identifier(encoding, TagClass::Universal, FWD(tag_number)), FWD(serde));
     }
 
+    template<typename Type>
+    struct Explicit {
+
+        Type type;
+        explicit constexpr Explicit(auto&& type):
+            type(FWD(type)) {}
+
+        auto operator()(auto&& value) const {
+            return FWD(value);
+        }
+
+        void write(auto& writer, auto& value) const {
+            type.write(writer, value);
+        }
+
+        auto read(auto& reader) const -> decltype(type.read(reader)) {
+            return type.read(reader);
+        }
+
+    };
+    constexpr auto explicit_(auto&& type) {
+        return BER::type(Encoding::Constructed, 0x00, Explicit<std::decay_t<decltype(type)>>(FWD(type)));
+    }
+
     struct Boolean {
 
         auto operator()(bool value) const {
@@ -370,7 +394,7 @@ namespace BER {
     };
     template<typename Enum>
     constexpr auto enumerated() {
-        return type(Encoding::Primitive, 10, Enumerated<Enum>());
+        return type(Encoding::Primitive, 0x0a, Enumerated<Enum>());
     }
 
     template<typename ... Types>
@@ -496,15 +520,14 @@ namespace BER {
             return Choice<TagNumber, decltype(types), tag_numbers..., tag_number>(std::move(types));
         }
 
-        template<size_t i>
-        static constexpr auto tag_number() {
+        static constexpr auto tag_number(size_t i) {
             return std::array{tag_numbers...}[i];
         }
 
         template<TagNumber tag_number, size_t i = 0>
         static constexpr auto index_of() {
             static_assert(i < sizeof...(tag_numbers), "tag number not found among choices");
-            if constexpr (tag_number == Choice::tag_number<i>()) {
+            if constexpr (tag_number == Choice::tag_number(i)) {
                 return i;
             } else if constexpr (i < sizeof...(tag_numbers)) {
                 return index_of<tag_number, i + 1>();
@@ -533,7 +556,7 @@ namespace BER {
 
             template<size_t i>
             static auto indexed(auto&& value) {
-                return Read{Choice::tag_number<i>(), Variant(std::in_place_index_t<i>(), FWD(value))};
+                return Read{Choice::tag_number(i), Variant(std::in_place_index_t<i>(), FWD(value))};
             }
 
             bool operator==(Read const& that) const {

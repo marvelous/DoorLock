@@ -147,7 +147,7 @@ namespace LDAP {
     constexpr auto filter = BER::choice<Filter>()
         .with<Filter::And>(BER::set_of(filter0))
         .with<Filter::Or>(BER::set_of(filter0))
-        // .with<Filter::Not>(filter0)
+        .with<Filter::Not>(BER::explicit_(filter0))
         .with<Filter::EqualityMatch>(attribute_value_assertion)
         .with<Filter::Substrings>(substring_filter)
         .with<Filter::GreaterOrEqual>(attribute_value_assertion)

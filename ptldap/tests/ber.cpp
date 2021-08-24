@@ -119,6 +119,7 @@ TEST_CASE("primitives") {
     type_write_read(octet_string, "\x04\x05hello"sv, "hello"sv);
     type_write_read(null, "\x05\x00"sv, nullptr);
     type_read_fail(null, "\x05\x01\x00"sv);
+    type_write_read(explicit_(null), "\x20\x02\x05\x00"sv, nullptr);
 
 }
 
