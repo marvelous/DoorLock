@@ -1,182 +1,255 @@
 #include "ptldap/ldap.hpp"
 
-#include <sstream>
 #include <ESP8266WiFi.h>
 #include <SPI.h>
 #include <MFRC522.h>
 #include <FastLED.h>
+#include <ESPAsyncTCP.h>
+#include <coroutine>
 
 #define RST_PIN D4
 #define SS_PIN D8
 #define RELAY_PIN D1
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-#define NUM_LEDS 1
-CRGB leds[NUM_LEDS];
+// TODO: choose state colors
+std::array<CRGB, 1> leds;
+void show_leds(auto ... leds) {
+  ::leds = {leds...};
+  FastLED.show();
+}
 
 // This file is in .gitignore
+// You can disallow anonymous access to the badge ID so people can't be impersonated
 // It should contain the following values:
 /*
-const char *ssid = "WIFI_SSID";
-const char *password = "WIFI_PSK";
-const char *host = "LDAP_HOST";
-const uint16_t port = LDAP_PORT;
+#define WIFI_SSID "WIFI_SSID"
+#define WIFI_PASSWORD "WIFI_PSK"
+#define LDAP_HOSTNAME "ldap.posttenebraslab.ch"
+#define LDAP_PORT LDAP_PORT
+#define LDAP_LOGIN "cn=DoorLockCN,ou=DoorLockOU,dc=DoorLockDC"
+#define LDAP_PASSWORD "DOORLOCK_LDAP_PASSWD"
+#define LDAP_GROUP "ou=Members,dc=DoorLockDC"
 */
-#include "server.h"
-
-// This file should contains the login for the LDAP
-// You can disallow anonymous access to the badge ID so people can't be impersonated
-// It should contain the following value:
-/*
-const char* ldap_login = "cn=DoorLockCN,ou=DoorLockOU,dc=DoorLockDC";
-const char* ldap_passwd = "DOORLOCK_LDAP_PASSWD";
-const char* ldap_member_group = "ou=Members,dc=DoorLockDC";
-*/
-#include "login.h"
+#include "config.h"
 
 using std::literals::string_view_literals::operator""sv;
 
-void setup() {
-  Serial.begin(115200);
-
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-
-  // Wait a bit, can help when resetting or reflashing sometimes
-  delay(1000);
-
-  FastLED.addLeds<WS2812, D3, GRB>(leds, NUM_LEDS);
-  leds[0] = CRGB::Purple;
-  FastLED.show();
-
-  // Init the SPI for the RFID reader
-  SPI.begin();
-	mfrc522.PCD_Init();
-  mfrc522.PCD_DumpVersionToSerial();
-  pinMode(RELAY_PIN, OUTPUT);
-
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-
-  Serial.print("Connecting to WiFi...");
-  bool led_state = false;
-  while (WiFi.status() != WL_CONNECTED) {
-    if (led_state) {
-      leds[0] = CRGB::Purple;
-      FastLED.show();
-    } else {
-      leds[0] = CRGB::Black;
-      FastLED.show();
-    }
-    delay(500);
-    Serial.print(".");
-    led_state = !led_state;
+void serial_print_hex(char c) {
+  Serial.print((c >> 4) & 0xf, HEX);
+  Serial.print((c >> 0) & 0xf, HEX);
+}
+void serial_print_hex(auto const& string) {
+  for (char c : string) {
+    serial_print_hex(c);
   }
-  Serial.println("");
-
-  Serial.print("WiFi connected, IP: ");
-  Serial.println(WiFi.localIP());
 }
 
-void loop() {
-  leds[0] = CRGB::Red;
-  FastLED.show();
+AsyncClient client;
 
-  // Reset the loop if no new card present on the sensor/reader. This saves the entire process when idle.
-	if (!mfrc522.PICC_IsNewCardPresent()) {
-    delay(100);
-		return;
-	}
+void ldap_send(auto const& message) {
+  Serial.println("> LDAP message:");
 
-	// Read the cards, restart the loop on error
-	if (!mfrc522.PICC_ReadCardSerial()) {
-		return;
-	}
-
-  leds[0] = CRGB::Blue;
-  FastLED.show();
-
-  // Save the badge NUID into a string
-  Serial.print("Badge NUID: ");
-  std::string badgenuidstr;
-  std::ostringstream badgenuidss;
-  for (char i = 0; i < mfrc522.uid.size; i++) {
-    if (mfrc522.uid.uidByte[i] < 0x10) {
-      Serial.print('0');
+  struct {
+    void write(char c) {
+      write({&c, 1});
     }
-    Serial.print(mfrc522.uid.uidByte[i], HEX);
-    badgenuidss << (char) mfrc522.uid.uidByte[i];
-	}
+    void write(std::string_view bytes) {
+      serial_print_hex(bytes);
+      client.write(bytes.data(), bytes.size());
+    }
+  } writer;
+  // TODO: check buffer overflow behavior, maybe buffer here
+  message.write(writer);
+
   Serial.println();
-  badgenuidstr = badgenuidss.str();
+}
+auto ldap_receive() {
+  return std::optional<bool>{}; // TODO
+}
 
-  // Connect to the LDAP server
-  Serial.print("connecting to ");
-  Serial.print(host);
-  Serial.print(':');
-  Serial.println(port);
+struct Timer {
 
-  // WiFiClient client;
-  BearSSL::WiFiClientSecure client;
-  client.setInsecure();
-  if (!client.connect(host, port)) {
-    Serial.println("connection failed");
-    delay(500);
-    return;
+  size_t remaining = 0;
+
+  void reset(auto remaining) {
+    this->remaining = remaining;
+  }
+  bool done() {
+    if (remaining) {
+      --remaining;
+    }
+    return remaining == 0;
   }
 
-  // This will send a string to the server
-  Serial.println("Connecting to LDAP");
-  if (client.connected()) {
-    auto writer = Bytes::StringWriter();
-    LDAP::message(1, LDAP::bind_request(3, ldap_login, LDAP::authentication_choice.make<LDAP::AuthenticationChoice::Simple>(ldap_passwd)), std::nullopt).write(writer);
-    auto req = std::move(writer.string);
-    Serial.println("> BindRequest");
-    for(int i = 0; i < req.length(); i++) {
-      if (req.c_str()[i] < 0x10) {
-        Serial.print('0');
+};
+
+template<typename Callbacks>
+struct Service {
+
+  enum class State {
+    INACTIVE, ACTIVATING, ACTIVE,
+  } state = State::INACTIVE;
+
+  Callbacks callbacks;
+
+  void deactivate() {
+    callbacks.inactive();
+    state = State::INACTIVE;
+  }
+
+  bool activate() {
+    if (!callbacks.check_condition()) {
+      if (state != State::INACTIVE) {
+        deactivate();
       }
-      Serial.print(req.c_str()[i], HEX);
+      return false;
     }
-    Serial.println();
-    client.write((const uint8_t*)req.c_str(), req.length());
-  } else {
+
+    switch (state) {
+    case State::INACTIVE:
+      callbacks.activating();
+      state = State::ACTIVATING;
+    case State::ACTIVATING:
+      if (!callbacks.check_activating()) {
+        return false;
+      }
+      callbacks.active();
+      state = State::ACTIVE;
+      return true;
+    case State::ACTIVE:
+      if (callbacks.check_active()) {
+        return true;
+      }
+      deactivate();
+      return false;
+    }
+  }
+
+};
+
+struct WifiCallbacks {
+  bool check_condition() {
+    return true;
+  }
+  void activating() {
+    show_leds(CRGB::Purple);
+    Serial.print("Connecting to WiFi...");
+  }
+  bool check_activating() {
+    return WiFi.status() == WL_CONNECTED;
+  }
+  void active() {
+    Serial.print("WiFi connected, IP: ");
+    Serial.println(WiFi.localIP());
+  }
+  bool check_active() {
+    return WiFi.status() == WL_CONNECTED;
+  }
+  void inactive() {
+  }
+};
+Service<WifiCallbacks> wifi_service;
+auto wifi_task = []()->std::string{co_yield 0;}();
+
+struct ClientCallbacks {
+  bool check_condition() {
+    return wifi_service.activate();
+  }
+  void activating() {
+    show_leds(CRGB::Blue);
+    Serial.print("connecting to ");
+    Serial.print(LDAP_HOSTNAME);
+    Serial.print(':');
+    Serial.println(LDAP_PORT);
+    client.connect(LDAP_HOSTNAME, LDAP_PORT);
+  }
+  bool check_activating() {
+    return client.connected();
+  }
+  void active() {
+    Serial.println("connected");
+  }
+  bool check_active() {
+    return client.connected();
+  }
+  void inactive() {
     client.stop();
-    delay(2000);
-    return;
   }
+};
+Service<ClientCallbacks> client_service;
 
-  // Wait for data to be available
-  unsigned long timeout = millis();
-  while (client.available() == 0) {
-    if (millis() - timeout > 5000) {
-      Serial.println(">>> Client Timeout !");
-      client.stop();
-      return;
+struct BindCallbacks {
+  bool check_condition() {
+    return client_service.activate();
+  }
+  void activating() {
+    show_leds(CRGB::Purple);
+    ldap_send(LDAP::message(1, LDAP::bind_request(1, LDAP_LOGIN, LDAP::authentication_choice.make<LDAP::AuthenticationChoice::Simple>(LDAP_PASSWORD)), std::nullopt));
+  }
+  bool check_activating() {
+    auto message = ldap_receive();
+    if (!message) {
+      return false;
     }
+    // TODO: check result
+    return true;
   }
+  void active() {
+  }
+  bool check_active() {
+    return true;
+  }
+  void inactive() {
+  }
+};
+Service<BindCallbacks> bind_service;
 
-  // TODO: check if connection is accepted
-  Serial.println("<BindResponse");
-  while (client.available()) {
-    char ch = static_cast<char>(client.read());
-    if(ch < 0x10) {
-      Serial.print('0');
+std::string badgenuid;
+struct BadgeCallbacks {
+  bool check_condition() {
+    return true;
+  }
+  void activating() {
+  }
+  bool check_activating() {
+    return mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial();
+  }
+  void active() {
+    badgenuid.reserve(mfrc522.uid.size);
+    for (byte b : mfrc522.uid.uidByte) {
+      badgenuid.push_back(b);
+      if (badgenuid.size() == mfrc522.uid.size) {
+        break;
+      }
     }
-    Serial.print(ch, HEX);
-  }
-  Serial.println();
 
-  // Search for a LDAP user with the scanned badge NUID
-  // TODO: add a filter for ptl-active group
-  Serial.println("sending data to server");
-  if (client.connected()) {
-    auto writer = Bytes::StringWriter();
-    LDAP::message(
+    Serial.print("Badge NUID: ");
+    serial_print_hex(badgenuid);
+    Serial.println();
+  }
+  bool check_active() {
+    return true;
+  }
+  void inactive() {
+    badgenuid.clear();
+  }
+};
+Service<BadgeCallbacks> badge_service;
+
+struct SearchCallbacks {
+  bool check_condition() {
+    return bind_service.activate() && badge_service.activate();
+  }
+  void activating() {
+    // Search for a LDAP user with the scanned badge NUID
+    // TODO: add a filter for ptl-active group
+    Serial.println("sending data to server");
+
+    ldap_send(LDAP::message(
       2,
       LDAP::search_request(
-        ldap_member_group,
+        LDAP_GROUP,
         LDAP::SearchRequestScope::SingleLevel,
         LDAP::SearchRequestDerefAliases::NeverDerefAliases,
         0,
@@ -185,75 +258,82 @@ void loop() {
         LDAP::filter.make<LDAP::Filter::ExtensibleMatch>(
           std::nullopt,
           "badgenuid"sv,
-          std::string_view(badgenuidstr),
+          std::string_view(badgenuid),
           std::nullopt
         ),
         LDAP::attribute_selection("cn"sv)
       ),
       std::nullopt
-    ).write(writer);
-    auto req = std::move(writer.string);
-    Serial.println(">SearchRequest");
-    for(int i = 0; i < req.length(); i++) {
-      if (req.c_str()[i] < 0x10) {
-        Serial.print('0');
-      }
-      Serial.print(req.c_str()[i], HEX);
-    }
-    Serial.println();
-    client.write((const uint8_t*)req.c_str(), req.length());
-  } else {
-    client.stop();
-    delay(2000);
-    Serial.println("Failed");
-    return;
+    ));
   }
-
-  timeout = millis();
-  while (client.available() == 0) {
-    if (millis() - timeout > 5000) {
-      Serial.println(">>> Client Timeout !");
-      client.stop();
-      return;
+  bool check_activating() {
+    auto message = ldap_receive();
+    if (!message) {
+      return false;
     }
+    // TODO: check result
+    return true;
   }
-
-  // TODO: properly check if an user is found
-  std::string res;
-  Serial.println("<SearchResponse");
-  while (client.available()) {
-    char ch = static_cast<char>(client.read());
-    res += ch;
-    if(ch < 0x10) {
-      Serial.print('0');
-    }
-    Serial.print(ch, HEX);
+  void active() {
   }
-  Serial.println();
+  bool check_active() {
+    return true;
+  }
+  void inactive() {
+  }
+};
+Service<SearchCallbacks> search_service;
 
-  // Close the connection
-  client.stop();
-
-  if (res.length() > 40) {
-    leds[0] = CRGB::Green;
-    FastLED.show();
+Timer door_timer;
+struct DoorCallbacks {
+  bool check_condition() {
+    return search_service.activate();
+  }
+  void activating() {
+    show_leds(CRGB::Green);
     Serial.println("Unlocking");
     digitalWrite(RELAY_PIN, HIGH);
-    delay(2000);
-    digitalWrite(RELAY_PIN, LOW);
-    leds[0] = CRGB::Red;
-    FastLED.show();
-    Serial.println("Locking back");
-  } else {
-    for(int i = 0; i < 5; i++) {
-      leds[0] = CRGB::Red;
-      FastLED.show();
-      delay(200);
-      leds[0] = CRGB::Black;
-      FastLED.show();
-      delay(200);
-    }
+    door_timer.reset(2000);
   }
+  bool check_activating() {
+    return door_timer.done();
+  }
+  void active() {
+    digitalWrite(RELAY_PIN, LOW);
+    show_leds(CRGB::Red);
+    badge_service.deactivate();
+  }
+  bool check_active() {
+    return true;
+  }
+  void inactive() {
+  }
+};
+Service<DoorCallbacks> door_service;
 
+void setup() {
+  Serial.begin(115200);
+
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(WIFI_SSID);
+
+  // Wait a bit, can help when resetting or reflashing sometimes
   delay(1000);
+
+  FastLED.addLeds<WS2812, D3, GRB>(leds.data(), leds.size());
+  show_leds(CRGB::Purple);
+
+  // Init the SPI for the RFID reader
+  SPI.begin();
+	mfrc522.PCD_Init();
+  mfrc522.PCD_DumpVersionToSerial();
+  pinMode(RELAY_PIN, OUTPUT);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+void loop() {
+  door_service.activate();
 }
