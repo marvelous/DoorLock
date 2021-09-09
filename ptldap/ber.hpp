@@ -243,7 +243,7 @@ namespace BER {
             serde.write(writer, value);
         }
 
-        auto read(auto& reader) const -> decltype(serde.read(reader)) {
+        auto read(auto& reader) const -> decltype(serde.read(std::declval<Bytes::StringViewReader&>())) {
             auto identifier = OPT_TRY(Identifier::read(reader));
             OPT_REQUIRE(identifier == this->identifier);
 
