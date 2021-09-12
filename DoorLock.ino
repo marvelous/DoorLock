@@ -50,6 +50,17 @@ BearSSL::WiFiClientSecure client;
 
 cont_t main_cont;
 
+template<auto available>
+size_t wait_available(auto& client) {
+  while (true) {
+    auto result = (client.*available)();
+    if (result > 0) {
+      return result;
+    }
+    cont_yield(&main_cont);
+  }
+}
+
 void ldap_send(auto const& message) {
   Serial.println("> Sending LDAP message:");
 
@@ -59,14 +70,7 @@ void ldap_send(auto const& message) {
     }
     void write(std::string_view bytes) {
       while (!bytes.empty()) {
-        size_t available;
-        while (true) {
-          available = client.availableForWrite();
-          if (available > 0) {
-            break;
-          }
-          cont_yield(&main_cont);
-        }
+        size_t available = wait_available<&decltype(client)::availableForWrite>(client);
         available = std::min(available, bytes.size());
 
         auto written = client.write(reinterpret_cast<uint8_t const*>(bytes.data()), available);
@@ -100,14 +104,7 @@ auto ldap_receive() {
       OPT_REQUIRE(parser_target <= receive_buffer.end());
 
       while (parser_end < parser_target) {
-        size_t available;
-        while (true) {
-          available = client.available();
-          if (available > 0) {
-            break;
-          }
-          cont_yield(&main_cont);
-        }
+        size_t available = wait_available<&decltype(client)::available>(client);
         available = std::min(available, size_t(receive_buffer.end() - parser_end));
 
         auto read = client.read(reinterpret_cast<uint8_t*>(parser_end), available);
