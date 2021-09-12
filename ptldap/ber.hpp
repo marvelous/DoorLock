@@ -250,7 +250,7 @@ namespace BER {
             auto length = OPT_TRY(Length::read(reader));
             OPT_REQUIRE(!length.is_indefinite());
 
-            auto bytes = OPT_TRY(reader.reader(*length.length));
+            auto bytes = Bytes::StringViewReader{OPT_TRY(reader.read(*length.length))};
             auto value = serde.read(bytes);
             OPT_REQUIRE(bytes.empty());
             return value;
@@ -456,9 +456,9 @@ namespace BER {
             }
         }
 
-        auto read(auto& reader) const -> decltype(reader.reader(0)) {
+        std::optional<Bytes::StringViewReader> read(auto& reader) const {
             auto size = reader.size();
-            return OPT_TRY(reader.reader(size));
+            return Bytes::StringViewReader{OPT_TRY(reader.read(size))};
         }
 
     };
@@ -588,13 +588,13 @@ namespace BER {
                 return std::optional<Read<Values...>>(std::nullopt);
             }
         }
-        auto read(auto& reader) const -> decltype(read_choices<0>(reader, *Identifier<TagNumber>::read(reader))) {
+        auto read(auto& reader) const -> decltype(read_choices<0>(reader, *Identifier<TagNumber>::read(std::declval<Bytes::StringViewReader&>()))) {
             auto&& identifier = OPT_TRY(Identifier<TagNumber>::read(reader));
 
             auto length = OPT_TRY(Length::read(reader));
             OPT_REQUIRE(!length.is_indefinite());
 
-            auto bytes = OPT_TRY(reader.reader(*length.length));
+            auto bytes = Bytes::StringViewReader{OPT_TRY(reader.read(*length.length))};
             return read_choices<0>(bytes, FWD(identifier));
         }
 

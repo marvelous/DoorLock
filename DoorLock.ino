@@ -58,18 +58,20 @@ void ldap_send(auto const& message) {
       write({&c, 1});
     }
     void write(std::string_view bytes) {
-      while (true) {
-        auto available = std::min(size_t(client.availableForWrite()), bytes.size());
-        auto head = bytes.substr(0, available);
-        bytes.remove_prefix(available);
-
-        client.write(reinterpret_cast<uint8_t const*>(head.data()), head.size());
-        serial_print_hex(head);
-
-        if (bytes.empty()) {
-          return;
+      while (!bytes.empty()) {
+        size_t available;
+        while (true) {
+          available = client.availableForWrite();
+          if (available > 0) {
+            break;
+          }
+          cont_yield(&main_cont);
         }
-        cont_yield(&main_cont);
+        available = std::min(available, bytes.size());
+
+        auto written = client.write(reinterpret_cast<uint8_t const*>(bytes.data()), available);
+        serial_print_hex(bytes.substr(0, written));
+        bytes.remove_prefix(written);
       }
     }
   } writer;
@@ -80,45 +82,53 @@ void ldap_send(auto const& message) {
 
 using ReceiveBuffer = std::array<char, 1024>;
 ReceiveBuffer receive_buffer;
-ReceiveBuffer::iterator write_pos;
-ReceiveBuffer::iterator read_pos;
+ReceiveBuffer::iterator parser_begin;
+ReceiveBuffer::iterator parser_end;
 
 auto ldap_receive() {
+  // compact buffer
+  auto begin = receive_buffer.begin();
+  std::memmove(begin, parser_begin, parser_end - parser_begin);
+  parser_begin = begin;
+
   struct {
     std::optional<uint8_t> read() {
       return OPT_TRY(read(1)).front();
     }
     std::optional<std::string_view> read(size_t length) {
-      auto target_pos = read_pos + length;
-      OPT_REQUIRE(target_pos <= receive_buffer.end());
-      while (write_pos < target_pos) {
-        // TODO: client.read, advance write_pos, yield
+      auto parser_target = parser_begin + length;
+      OPT_REQUIRE(parser_target <= receive_buffer.end());
+
+      while (parser_end < parser_target) {
+        size_t available;
+        while (true) {
+          available = client.available();
+          if (available > 0) {
+            break;
+          }
+          cont_yield(&main_cont);
+        }
+        available = std::min(available, size_t(receive_buffer.end() - parser_end));
+
+        auto read = client.read(reinterpret_cast<uint8_t*>(parser_end), available);
+        serial_print_hex(std::string_view(parser_end, read));
+        parser_end += read;
       }
-      auto result = std::string_view(read_pos, length);
-      read_pos = target_pos;
+
+      auto result = std::string_view(parser_begin, length);
+      parser_begin = parser_target;
       return result;
-    }
-    std::optional<Bytes::StringViewReader> reader(size_t length) {
-      return Bytes::StringViewReader{OPT_TRY(read(length))};
     }
   } reader;
   return LDAP::message.read(reader);
-}
-
-void ldap_compact() {
-  auto count = write_pos - read_pos;
-  auto begin = receive_buffer.begin();
-  std::memmove(begin, read_pos, count);
-  read_pos = begin;
-  write_pos = begin + count;
 }
 
 void main_task() {
 
   show_leds(CRGB::Purple);
 
-  write_pos = receive_buffer.begin();
-  read_pos = receive_buffer.begin();
+  parser_begin = receive_buffer.begin();
+  parser_end = receive_buffer.begin();
   ldap_send(LDAP::message(
     1,
     LDAP::bind_request(
@@ -132,7 +142,6 @@ void main_task() {
   ));
   auto message = ldap_receive();
   // TODO: check response message
-  ldap_compact();
 
   while (true) {
     show_leds(CRGB::Blue);
@@ -170,7 +179,6 @@ void main_task() {
 
     auto message = ldap_receive();
     // TODO: check response message
-    ldap_compact();
     if (false) {
 
       // TODO: badge not found

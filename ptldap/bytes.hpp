@@ -35,10 +35,6 @@ namespace Bytes {
             return result;
         }
 
-        std::optional<StringViewReader> reader(size_t length) {
-            return StringViewReader{OPT_TRY(read(length))};
-        }
-
         bool operator==(auto const& that) const {
             return this->string == that.string;
         }
