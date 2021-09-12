@@ -88,7 +88,7 @@ ReceiveBuffer receive_buffer;
 ReceiveBuffer::iterator parser_begin;
 ReceiveBuffer::iterator parser_end;
 
-auto ldap_receive() {
+auto ldap_receive(auto expected_message_id) {
   // compact buffer
   auto begin = receive_buffer.begin();
   std::memmove(begin, parser_begin, parser_end - parser_begin);
@@ -116,15 +116,30 @@ auto ldap_receive() {
       return result;
     }
   } reader;
-  return LDAP::message.read(reader);
+
+  auto message = LDAP::message.read(reader);
+  if (!message) {
+    Serial.println("Failed to read message from server");
+    // TODO: reboot?
+  }
+
+  auto [message_id, protocol_op, controls_opt] = *message;
+  if (message_id != expected_message_id) {
+    Serial.print("Received message id ");
+    Serial.print(message_id);
+    Serial.print(" != expected message id ");
+    Serial.println(expected_message_id);
+    // TODO: reboot?
+  }
+  // TODO: controls_opt is ignored
+  return protocol_op;
 }
 
-void main_task() {
+void ldap_bind() {
+  auto message_id = 1;
 
-  parser_begin = receive_buffer.begin();
-  parser_end = receive_buffer.begin();
   ldap_send(LDAP::message(
-    1,
+    message_id,
     LDAP::bind_request(
       1,
       LDAP_LOGIN,
@@ -134,8 +149,52 @@ void main_task() {
     ),
     std::nullopt
   ));
-  auto message = ldap_receive();
+
+  auto protocol_op = ldap_receive(message_id);
+  if (protocol_op.tag_number != LDAP::ProtocolOp::BindResponse) {
+    // TODO: reboot?
+  }
+  auto [result_code, matched_dn, diagnostic_message, referral] = protocol_op.get<LDAP::ProtocolOp::BindResponse>();
+  if (result_code != LDAP::ResultCode::Success) {
+    // TODO: reboot?
+  }
+}
+
+// Search for a LDAP user with the scanned badge NUID
+void ldap_search(std::string_view badgenuid) {
+  auto message_id = 2;
+
+  // TODO: add a filter for ptl-active group
+  Serial.println("sending data to server");
+  ldap_send(LDAP::message(
+    message_id,
+    LDAP::search_request(
+      LDAP_GROUP,
+      LDAP::SearchRequestScope::SingleLevel,
+      LDAP::SearchRequestDerefAliases::NeverDerefAliases,
+      0,
+      0,
+      false,
+      LDAP::filter.make<LDAP::Filter::ExtensibleMatch>(
+        std::nullopt,
+        "badgenuid"sv,
+        badgenuid,
+        std::nullopt
+      ),
+      LDAP::attribute_selection("cn"sv)
+    ),
+    std::nullopt
+  ));
+
+  auto message = ldap_receive(message_id);
   // TODO: check response message
+}
+
+void main_task() {
+
+  parser_begin = receive_buffer.begin();
+  parser_end = receive_buffer.begin();
+  ldap_bind();
 
   while (true) {
     show_leds(CRGB::Blue);
@@ -148,31 +207,7 @@ void main_task() {
     serial_print_hex(badgenuid);
     Serial.println();
 
-    // Search for a LDAP user with the scanned badge NUID
-    // TODO: add a filter for ptl-active group
-    Serial.println("sending data to server");
-    ldap_send(LDAP::message(
-      2,
-      LDAP::search_request(
-        LDAP_GROUP,
-        LDAP::SearchRequestScope::SingleLevel,
-        LDAP::SearchRequestDerefAliases::NeverDerefAliases,
-        0,
-        0,
-        false,
-        LDAP::filter.make<LDAP::Filter::ExtensibleMatch>(
-          std::nullopt,
-          "badgenuid"sv,
-          badgenuid,
-          std::nullopt
-        ),
-        LDAP::attribute_selection("cn"sv)
-      ),
-      std::nullopt
-    ));
-
-    auto message = ldap_receive();
-    // TODO: check response message
+    ldap_search(badgenuid);
     if (false) {
 
       // TODO: badge not found
