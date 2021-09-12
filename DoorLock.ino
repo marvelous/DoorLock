@@ -12,7 +12,6 @@
 #define RELAY_PIN D1
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-// TODO: choose state colors
 std::array<CRGB, 1> leds;
 void show_leds(auto ... leds) {
   ::leds = {leds...};
@@ -122,8 +121,6 @@ auto ldap_receive() {
 
 void main_task() {
 
-  show_leds(CRGB::Purple);
-
   parser_begin = receive_buffer.begin();
   parser_end = receive_buffer.begin();
   ldap_send(LDAP::message(
@@ -197,7 +194,6 @@ cont_t client_cont;
 void client_task() {
   while (true) {
 
-    show_leds(CRGB::Purple);
     Serial.print("connecting to ");
     Serial.print(LDAP_HOSTNAME);
     Serial.print(':');
@@ -219,6 +215,7 @@ void client_task() {
       cont_yield(&client_cont);
     } while (client.connected());
 
+    show_leds(CRGB::Purple);
     Serial.println("disconnected");
 
   }
@@ -228,8 +225,8 @@ cont_t wifi_cont;
 void wifi_task() {
   while (true) {
 
-    show_leds(CRGB::Purple);
-    Serial.println("Connecting to WiFi...");
+    Serial.print("Connecting to ");
+    Serial.println(WIFI_SSID);
 
     while (WiFi.status() != WL_CONNECTED) {
       cont_yield(&wifi_cont);
@@ -244,6 +241,7 @@ void wifi_task() {
       cont_yield(&wifi_cont);
     } while (WiFi.status() == WL_CONNECTED);
 
+    show_leds(CRGB::Purple);
     Serial.println("WiFi disconnected");
 
   }
@@ -251,10 +249,7 @@ void wifi_task() {
 
 void setup() {
   Serial.begin(115200);
-
   Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(WIFI_SSID);
 
   // Wait a bit, can help when resetting or reflashing sometimes
   delay(1000);
