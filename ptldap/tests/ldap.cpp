@@ -40,7 +40,7 @@ TEST_CASE("ldap.com") {
 
     }
 
-    SECTION("bind") {
+    SECTION("bind request") {
         // Example from https://ldap.com/ldapv3-wire-protocol-reference-bind/
         auto bytes = "\x30\x39\x02\x01\x01\x60\x34\x02\x01\x03\x04\x24\x75\x69\x64\x3d\x6a\x64\x6f\x65\x2c\x6f\x75\x3d\x50\x65\x6f\x70\x6c\x65\x2c\x64\x63\x3d\x65\x78\x61\x6d\x70\x6c\x65\x2c\x64\x63\x3d\x63\x6f\x6d\x80\x09\x73\x65\x63\x72\x65\x74\x31\x32\x33"sv;
 
@@ -64,6 +64,36 @@ TEST_CASE("ldap.com") {
 
             auto simple = authentication.get<LDAP::AuthenticationChoice::Simple>();
             CHECK(simple == "secret123"sv);
+
+            CHECK(controls_opt == std::nullopt);
+
+            check_bytes(reader.string, ""sv);
+        }
+
+    }
+
+    SECTION("bind response") {
+        // Example from https://ldap.com/ldapv3-wire-protocol-reference-bind/
+        auto bytes = "\x30\x0c\x02\x01\x01\x61\x07\x0a\x01\x00\x04\x00\x04\x00"sv;
+
+        SECTION("write") {
+            auto writer = Bytes::StringWriter();
+            LDAP::message(0x01, LDAP::bind_response(LDAP::ResultCode::Success, ""sv, ""sv, std::nullopt), std::nullopt).write(writer);
+            check_bytes(writer.string, bytes);
+        }
+
+        SECTION("read") {
+            auto reader = Bytes::StringViewReader{bytes};
+
+            auto [message_id, protocol_op, controls_opt] = TRY(LDAP::message.read(reader));
+            CHECK(message_id == 0x01);
+            CHECK(protocol_op.tag_number == LDAP::ProtocolOp::BindResponse);
+
+            auto [result_code, matched_dn, diagnostic_message, referral] = protocol_op.get<LDAP::ProtocolOp::BindResponse>();
+            CHECK(result_code == LDAP::ResultCode::Success);
+            CHECK(matched_dn == ""sv);
+            CHECK(diagnostic_message == ""sv);
+            CHECK(referral == std::nullopt);
 
             CHECK(controls_opt == std::nullopt);
 

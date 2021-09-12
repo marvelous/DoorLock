@@ -98,6 +98,9 @@ namespace LDAP {
     constexpr auto bind_request = BER::sequence(
         BER::integer, ldapdn, authentication_choice).application(ProtocolOp::BindRequest);
 
+    // TODO: SEQUENCE { COMPONENTS OF LDAPResult, serverSaslCreds    [7] OCTET STRING OPTIONAL }
+    constexpr auto bind_response = ldap_result.application(ProtocolOp::BindResponse);
+
     constexpr auto matching_rule_id = ldap_string;
     constexpr auto attribute_description = ldap_string;
     constexpr auto assertion_value = BER::octet_string;
@@ -211,6 +214,7 @@ namespace LDAP {
         message_id,
         BER::choice<ProtocolOp>()
             .with<ProtocolOp::BindRequest>(bind_request)
+            .with<ProtocolOp::BindResponse>(bind_response)
             .with<ProtocolOp::SearchRequest>(search_request)
             .with<ProtocolOp::DelRequest>(del_request),
         BER::optional(controls)
