@@ -102,7 +102,7 @@ TEST_CASE("ldap.com") {
 
     }
 
-    SECTION("search") {
+    SECTION("search request") {
         // Example from https://ldap.com/ldapv3-wire-protocol-reference-search/
         auto bytes = "\x30\x56\x02\x01\x02\x63\x51\x04\x11\x64\x63\x3d\x65\x78\x61\x6d\x70\x6c\x65\x2c\x64\x63\x3d\x63\x6f\x6d\x0a\x01\x02\x0a\x01\x00\x02\x02\x03\xe8\x02\x01\x1e\x01\x01\x00\xa0\x24\xa3\x15\x04\x0b\x6f\x62\x6a\x65\x63\x74\x43\x6c\x61\x73\x73\x04\x06\x70\x65\x72\x73\x6f\x6e\xa3\x0b\x04\x03\x75\x69\x64\x04\x04\x6a\x64\x6f\x65\x30\x06\x04\x01\x2a\x04\x01\x2b"sv;
 
@@ -174,6 +174,92 @@ TEST_CASE("ldap.com") {
             check_bytes(reader.string, ""sv);
         }
 
-    };
+    }
+
+    SECTION("search result entry") {
+        // Example from https://ldap.com/ldapv3-wire-protocol-reference-search/
+        auto bytes = "\x30\x49\x02\x01\x02\x64\x44\x04\x11\x64\x63\x3d\x65\x78\x61\x6d\x70\x6c\x65\x2c\x64\x63\x3d\x63\x6f\x6d\x30\x2f\x30\x1c\x04\x0b\x6f\x62\x6a\x65\x63\x74\x43\x6c\x61\x73\x73\x31\x0d\x04\x03\x74\x6f\x70\x04\x06\x64\x6f\x6d\x61\x69\x6e\x30\x0f\x04\x02\x64\x63\x31\x09\x04\x07\x65\x78\x61\x6d\x70\x6c\x65"sv;
+
+        SECTION("write") {
+            auto writer = Bytes::StringWriter();
+            LDAP::message(
+                0x02,
+                LDAP::search_result_entry(
+                    "dc=example,dc=com"sv,
+                    std::tuple(
+                        LDAP::partial_attribute(
+                            "objectClass"sv,
+                            std::tuple("top"sv, "domain"sv)
+                        ),
+                        LDAP::partial_attribute(
+                            "dc"sv,
+                            std::tuple("example"sv)
+                        )
+                    )
+                ),
+                std::nullopt
+            ).write(writer);
+            check_bytes(writer.string, bytes);
+        }
+
+        SECTION("read") {
+            auto reader = Bytes::StringViewReader{bytes};
+
+            auto [message_id, protocol_op, controls_opt] = TRY(LDAP::message.read(reader));
+            CHECK(message_id == 0x02);
+            CHECK(protocol_op.tag_number == LDAP::ProtocolOp::SearchResultEntry);
+
+            auto [object_name, attributes] = protocol_op.get<LDAP::ProtocolOp::SearchResultEntry>();
+            CHECK(object_name == "dc=example,dc=com"sv);
+
+            {
+                auto [type, vals] = TRY(LDAP::partial_attribute.read(attributes));
+                CHECK(type == "objectClass"sv);
+                CHECK(TRY(LDAP::attribute_value.read(vals)) == "top"sv);
+                CHECK(TRY(LDAP::attribute_value.read(vals)) == "domain"sv);
+            }
+            {
+                auto [type, vals] = TRY(LDAP::partial_attribute.read(attributes));
+                CHECK(type == "dc"sv);
+                CHECK(TRY(LDAP::attribute_value.read(vals)) == "example"sv);
+            }
+            check_bytes(attributes.string, ""sv);
+
+            CHECK(controls_opt == std::nullopt);
+
+            check_bytes(reader.string, ""sv);
+        }
+
+    }
+
+    SECTION("search result done") {
+        // Example from https://ldap.com/ldapv3-wire-protocol-reference-search/
+        auto bytes = "\x30\x0c\x02\x01\x02\x65\x07\x0a\x01\x00\x04\x00\x04\x00"sv;
+
+        SECTION("write") {
+            auto writer = Bytes::StringWriter();
+            LDAP::message(0x02, LDAP::search_result_done(LDAP::ResultCode::Success, ""sv, ""sv, std::nullopt), std::nullopt).write(writer);
+            check_bytes(writer.string, bytes);
+        }
+
+        SECTION("read") {
+            auto reader = Bytes::StringViewReader{bytes};
+
+            auto [message_id, protocol_op, controls_opt] = TRY(LDAP::message.read(reader));
+            CHECK(message_id == 0x02);
+            CHECK(protocol_op.tag_number == LDAP::ProtocolOp::SearchResultDone);
+
+            auto [result_code, matched_dn, diagnostic_message, referral] = protocol_op.get<LDAP::ProtocolOp::SearchResultDone>();
+            CHECK(result_code == LDAP::ResultCode::Success);
+            CHECK(matched_dn == ""sv);
+            CHECK(diagnostic_message == ""sv);
+            CHECK(referral == std::nullopt);
+
+            CHECK(controls_opt == std::nullopt);
+
+            check_bytes(reader.string, ""sv);
+        }
+
+    }
 
 }

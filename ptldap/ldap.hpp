@@ -183,6 +183,15 @@ namespace LDAP {
         attribute_selection
     ).application(ProtocolOp::SearchRequest);
 
+    constexpr auto attribute_value = BER::octet_string;
+    constexpr auto partial_attribute = BER::sequence(
+        attribute_description, BER::set_of(attribute_value));
+    constexpr auto partial_attribute_list = BER::sequence_of(partial_attribute);
+    constexpr auto search_result_entry = BER::sequence(
+        ldapdn, partial_attribute_list).application(ProtocolOp::SearchResultEntry);
+
+    constexpr auto search_result_done = ldap_result.application(ProtocolOp::SearchResultDone);
+
     constexpr auto control = BER::sequence(
         ldapoid, BER::boolean, BER::optional(BER::octet_string));
 
@@ -216,6 +225,8 @@ namespace LDAP {
             .with<ProtocolOp::BindRequest>(bind_request)
             .with<ProtocolOp::BindResponse>(bind_response)
             .with<ProtocolOp::SearchRequest>(search_request)
+            .with<ProtocolOp::SearchResultEntry>(search_result_entry)
+            .with<ProtocolOp::SearchResultDone>(search_result_done)
             .with<ProtocolOp::DelRequest>(del_request),
         BER::optional(controls)
     );
