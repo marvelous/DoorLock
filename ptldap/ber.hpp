@@ -16,7 +16,6 @@
 #include "bytes.hpp"
 #include <tuple>
 #include <variant>
-#include <experimental/array>
 
 namespace BER {
 
@@ -447,12 +446,17 @@ namespace BER {
             type(FWD(type)) {}
 
         auto operator()(auto&&... args) const {
-            return std::experimental::make_array(FWD(args)...);
+            return std::tuple(FWD(args)...);
         }
 
         void write(auto& writer, auto const& elements) const {
-            for (auto const& element : elements) {
-                type(element).write(writer);
+            write_elements<0>(writer, elements);
+        }
+        template<size_t i>
+        void write_elements(auto& writer, auto const& elements) const {
+            if constexpr (i < std::tuple_size<std::decay_t<decltype(elements)>>()) {
+                type(std::get<i>(elements)).write(writer);
+                write_elements<i + 1>(writer, elements);
             }
         }
 
