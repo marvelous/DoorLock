@@ -4,7 +4,6 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <FastLED.h>
-#include <ESPAsyncTCP.h>
 #include <cont.h>
 
 #define RST_PIN D4
