@@ -43,6 +43,13 @@ void serial_print_hex(auto const& string) {
   }
 }
 
+void fatal [[noreturn]] () {
+  show_leds(CRGB::White);
+  // TODO: reboot
+  while(true) {
+  }
+}
+
 // WiFiClient client;
 BearSSL::WiFiClientSecure client;
 
@@ -118,44 +125,72 @@ auto ldap_receive(auto expected_message_id) {
 
   auto message = LDAP::message.read(reader);
   if (!message) {
-    Serial.println("Failed to read message from server");
-    // TODO: reboot?
+    Serial.println("Expected LDAP message");
+    fatal();
   }
 
   auto [message_id, protocol_op, controls_opt] = *message;
   if (message_id != expected_message_id) {
-    Serial.print("Received message id ");
-    Serial.print(message_id);
-    Serial.print(" != expected message id ");
-    Serial.println(expected_message_id);
-    // TODO: reboot?
+    Serial.print("Expected message id ");
+    Serial.print(expected_message_id);
+    Serial.print(" != ");
+    Serial.println(message_id);
+    fatal();
   }
-  // TODO: controls_opt is ignored
+
+  if (controls_opt) {
+    Serial.println("Got controls");
+    auto controls = *controls_opt;
+    while (!controls.empty()) {
+      auto control = LDAP::control.read(controls);
+      if (!control) {
+        Serial.println("Expected control");
+        fatal();
+      }
+      auto [control_type, criticality, control_value] = *control;
+      Serial.print("Control ");
+      Serial.write(control_type.data(), control_type.size());
+      Serial.print(" ");
+      Serial.print(criticality);
+      if (control_value) {
+        Serial.print(" ");
+        Serial.write(control_value->data(), control_value->size());
+      }
+      Serial.println();
+    }
+  }
+
   return protocol_op;
 }
 
 void ldap_bind() {
   auto message_id = 1;
 
-  ldap_send(LDAP::message(
-    message_id,
-    LDAP::bind_request(
-      1,
-      LDAP_LOGIN,
-      LDAP::authentication_choice.make<LDAP::AuthenticationChoice::Simple>(
-        LDAP_PASSWORD
-      )
-    ),
-    std::nullopt
-  ));
+  ldap_send(
+    LDAP::message(
+      message_id,
+      LDAP::bind_request(
+        1,
+        LDAP_LOGIN,
+        LDAP::authentication_choice.make<LDAP::AuthenticationChoice::Simple>(
+          LDAP_PASSWORD
+        )
+      ),
+      std::nullopt
+    )
+  );
 
   auto protocol_op = ldap_receive(message_id);
   if (protocol_op.tag_number != LDAP::ProtocolOp::BindResponse) {
-    // TODO: reboot?
+    Serial.print("Expected bind response ");
+    Serial.println(int(protocol_op.tag_number));
+    fatal();
   }
   auto [result_code, matched_dn, diagnostic_message, referral] = protocol_op.get<LDAP::ProtocolOp::BindResponse>();
   if (result_code != LDAP::ResultCode::Success) {
-    // TODO: reboot?
+    Serial.print("Expected bind response success ");
+    Serial.println(int(result_code));
+    fatal();
   }
 }
 
@@ -165,28 +200,74 @@ void ldap_search(std::string_view badgenuid) {
 
   // TODO: add a filter for ptl-active group
   Serial.println("sending data to server");
-  ldap_send(LDAP::message(
-    message_id,
-    LDAP::search_request(
-      LDAP_GROUP,
-      LDAP::SearchRequestScope::SingleLevel,
-      LDAP::SearchRequestDerefAliases::NeverDerefAliases,
-      0,
-      0,
-      false,
-      LDAP::filter.make<LDAP::Filter::ExtensibleMatch>(
-        std::nullopt,
-        "badgenuid"sv,
-        badgenuid,
-        std::nullopt
+  ldap_send(
+    LDAP::message(
+      message_id,
+      LDAP::search_request(
+        LDAP_GROUP,
+        LDAP::SearchRequestScope::SingleLevel,
+        LDAP::SearchRequestDerefAliases::NeverDerefAliases,
+        0,
+        0,
+        false,
+        LDAP::filter.make<LDAP::Filter::ExtensibleMatch>(
+          std::nullopt,
+          "badgenuid"sv,
+          badgenuid,
+          std::nullopt
+        ),
+        LDAP::attribute_selection("cn"sv)
       ),
-      LDAP::attribute_selection("cn"sv)
-    ),
-    std::nullopt
-  ));
+      std::nullopt
+    )
+  );
 
-  auto message = ldap_receive(message_id);
-  // TODO: check response message
+  while (true) {
+    auto protocol_op = ldap_receive(message_id);
+    switch (protocol_op.tag_number) {
+    default:
+      Serial.print("Expected search response ");
+      Serial.println(int(protocol_op.tag_number));
+      fatal();
+    case LDAP::ProtocolOp::SearchResultEntry: {
+      auto [object_name, attributes] = protocol_op.get<LDAP::ProtocolOp::SearchResultEntry>();
+      Serial.print("Object name ");
+      Serial.write(object_name.data(), object_name.size());
+      Serial.println();
+      while (!attributes.empty()) {
+        auto partial_attribute = LDAP::partial_attribute.read(attributes);
+        if (!partial_attribute) {
+          Serial.println("Expected partial attribute");
+          fatal();
+        }
+        auto [type, vals] = *partial_attribute;
+        Serial.print("Attribute type ");
+        Serial.write(type.data(), type.size());
+        Serial.println();
+        while (!vals.empty()) {
+          auto val = LDAP::attribute_value.read(vals);
+          if (!val) {
+            Serial.println("Expected attribute value");
+            return;
+          }
+          Serial.print("Attribute value ");
+          Serial.write(val->data(), val->size());
+          Serial.println();
+        }
+      }
+      continue;
+    }
+    case LDAP::ProtocolOp::SearchResultDone: {
+      auto [result_code, matched_dn, diagnostic_message, referral] = protocol_op.get<LDAP::ProtocolOp::BindResponse>();
+      if (result_code != LDAP::ResultCode::Success) {
+        Serial.print("Expected search response success ");
+        Serial.println(int(result_code));
+        fatal();
+      }
+      return;
+    }
+    }
+  }
 }
 
 void main_task() {
