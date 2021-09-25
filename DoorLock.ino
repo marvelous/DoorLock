@@ -70,7 +70,7 @@ void client_check() {
 }
 
 template<auto available>
-size_t wait_available(auto& client) {
+size_t wait_available() {
   while (true) {
     auto result = (client.*available)();
     if (result > 0) {
@@ -81,26 +81,36 @@ size_t wait_available(auto& client) {
   }
 }
 
-void ldap_send(auto const& message) {
-  Serial.println("> Sending LDAP message:");
+using SendBuffer = std::array<char, 1024>;
+SendBuffer send_buffer;
+SendBuffer::iterator send_end;
 
+void ldap_send(auto const& message) {
+  send_end = send_buffer.begin();
   struct {
     void write(char c) {
       write({&c, 1});
     }
     void write(std::string_view bytes) {
-      while (!bytes.empty()) {
-        size_t available = wait_available<&decltype(client)::availableForWrite>(client);
-        available = std::min(available, bytes.size());
-
-        auto written = client.write(reinterpret_cast<uint8_t const*>(bytes.data()), available);
-        serial_print_hex(bytes.substr(0, written));
-        bytes.remove_prefix(written);
+      if (send_buffer.end() < send_end + bytes.size()) {
+        Serial.println("Send buffer overflow");
+        fatal();
       }
+      std::memcpy(send_end, bytes.data(), bytes.size());
+      send_end += bytes.size();
     }
   } writer;
   message.write(writer);
 
+  Serial.println("> Sending LDAP message:");
+  for (SendBuffer::iterator it = send_buffer.begin(); it != send_end;) {
+    size_t available = wait_available<&decltype(client)::availableForWrite>();
+    available = std::min(available, size_t(send_end - it));
+
+    auto written = client.write(reinterpret_cast<uint8_t const*>(it), available);
+    serial_print_hex(std::string_view(it, written));
+    it += written;
+  }
   Serial.println();
 }
 
@@ -121,10 +131,13 @@ auto ldap_receive(auto expected_message_id) {
     }
     std::optional<std::string_view> read(size_t length) {
       auto parser_target = parser_begin + length;
-      OPT_REQUIRE(parser_target <= receive_buffer.end());
+      if (parser_target > receive_buffer.end()) {
+        Serial.println("Receive buffer overflow");
+        fatal();
+      }
 
       while (parser_end < parser_target) {
-        size_t available = wait_available<&decltype(client)::available>(client);
+        size_t available = wait_available<&decltype(client)::available>();
         available = std::min(available, size_t(receive_buffer.end() - parser_end));
 
         auto read = client.read(reinterpret_cast<uint8_t*>(parser_end), available);
