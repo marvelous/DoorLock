@@ -1,6 +1,6 @@
 #include <optional>
 #include <ostream>
-#include "string_view.hpp"
+#include <string_view>
 
 #define FWD(val) std::forward<decltype(val)>(val)
 #define OPT_REQUIRE(condition) if (!(condition)) return std::nullopt
@@ -28,7 +28,7 @@ namespace Bytes {
             return result;
         }
 
-        std::optional<nonstd::string_view> read(size_t length) {
+        std::optional<std::string_view> read(size_t length) {
             OPT_REQUIRE(length <= string.size());
             auto result = string.substr(0, length);
             string.remove_prefix(length);
