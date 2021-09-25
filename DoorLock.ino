@@ -37,12 +37,13 @@ struct Hex {
   size_t size;
 };
 void serial_print1(auto&& arg) {
-  if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, Hex>) {
+  using Arg = std::decay_t<decltype(arg)>;
+  if constexpr (std::is_same_v<Arg, Hex>) {
     for (char c : std::string_view{arg.begin, arg.size}) {
       Serial.print((c >> 4) & 0xf, HEX);
       Serial.print((c >> 0) & 0xf, HEX);
     }
-  } else if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, std::string_view>) {
+  } else if constexpr (std::is_same_v<Arg, std::string_view>) {
     Serial.write(arg.data(), arg.size());
   } else {
     Serial.print(arg);
@@ -64,6 +65,7 @@ struct FatalError: public std::exception {
 void fatal [[noreturn]] (auto ... args) {
   show_leds(CRGB::White);
   serial_println(FWD(args)...);
+  // TODO: reboot
   throw FatalError();
 }
 
@@ -287,8 +289,6 @@ void ldap_search(std::string_view badgenuid) {
 
 void loop_with_client() {
 
-  parser_begin = receive_buffer.begin();
-  parser_end = receive_buffer.begin();
   ldap_bind();
 
   while (true) {
@@ -329,6 +329,8 @@ void loop_with_wifi() {
     }
 
     serial_println("connected");
+    parser_begin = receive_buffer.begin();
+    parser_end = receive_buffer.begin();
     try {
       loop_with_client();
     } catch (ClientError&) {
