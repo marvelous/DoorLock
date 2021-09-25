@@ -4,7 +4,6 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <FastLED.h>
-#include <cont.h>
 
 #define RST_PIN D4
 #define SS_PIN D8
@@ -43,17 +42,32 @@ void serial_print_hex(auto const& string) {
   }
 }
 
-void fatal [[noreturn]] () {
-  show_leds(CRGB::White);
-  // TODO: reboot
-  while(true) {
-  }
-}
-
 // WiFiClient client;
 BearSSL::WiFiClientSecure client;
 
-cont_t main_cont;
+struct FatalError: public std::exception {
+};
+void fatal [[noreturn]] () {
+  show_leds(CRGB::White);
+  throw FatalError();
+}
+
+struct WiFiError: public std::exception {
+};
+void wifi_check() {
+  if (WiFi.status() != WL_CONNECTED) {
+    throw WiFiError();
+  }
+}
+
+struct ClientError: public std::exception {
+};
+void client_check() {
+  wifi_check();
+  if (!client.connected()) {
+    throw ClientError();
+  }
+}
 
 template<auto available>
 size_t wait_available(auto& client) {
@@ -62,7 +76,8 @@ size_t wait_available(auto& client) {
     if (result > 0) {
       return result;
     }
-    cont_yield(&main_cont);
+    yield();
+    client_check();
   }
 }
 
@@ -270,7 +285,7 @@ void ldap_search(std::string_view badgenuid) {
   }
 }
 
-void main_task() {
+void loop_with_client() {
 
   parser_begin = receive_buffer.begin();
   parser_end = receive_buffer.begin();
@@ -279,7 +294,8 @@ void main_task() {
   while (true) {
     show_leds(CRGB::Blue);
     while (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
-      cont_yield(&main_cont);
+      yield();
+      client_check();
     }
 
     auto badgenuid = std::string_view(reinterpret_cast<char*>(mfrc522.uid.uidByte), mfrc522.uid.size);
@@ -300,13 +316,11 @@ void main_task() {
     digitalWrite(RELAY_PIN, HIGH);
     delay(2000);
     digitalWrite(RELAY_PIN, LOW);
-
   }
 
 }
 
-cont_t client_cont;
-void client_task() {
+void loop_with_wifi() {
   while (true) {
 
     Serial.print("connecting to ");
@@ -315,49 +329,18 @@ void client_task() {
     Serial.println(LDAP_PORT);
     if (!client.connect(LDAP_HOSTNAME, LDAP_PORT)) {
       Serial.println("connection failed");
+      wifi_check();
       continue;
     }
 
-    while (!client.connected()) {
-      cont_yield(&client_cont);
-    }
-
     Serial.println("connected");
-    cont_init(&main_cont);
-
-    do {
-      cont_run(&main_cont, main_task);
-      cont_yield(&client_cont);
-    } while (client.connected());
+    try {
+      loop_with_client();
+    } catch (ClientError&) {
+    }
 
     show_leds(CRGB::Purple);
     Serial.println("disconnected");
-
-  }
-}
-
-cont_t wifi_cont;
-void wifi_task() {
-  while (true) {
-
-    Serial.print("Connecting to ");
-    Serial.println(WIFI_SSID);
-
-    while (WiFi.status() != WL_CONNECTED) {
-      cont_yield(&wifi_cont);
-    }
-
-    Serial.print("WiFi connected, IP: ");
-    Serial.println(WiFi.localIP());
-    cont_init(&client_cont);
-
-    do {
-      cont_run(&client_cont, client_task);
-      cont_yield(&wifi_cont);
-    } while (WiFi.status() == WL_CONNECTED);
-
-    show_leds(CRGB::Purple);
-    Serial.println("WiFi disconnected");
 
   }
 }
@@ -383,10 +366,24 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   client.setInsecure();
-
-  cont_init(&wifi_cont);
 }
 
 void loop() {
-  cont_run(&wifi_cont, wifi_task);
+  Serial.print("Connecting to ");
+  Serial.println(WIFI_SSID);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    yield();
+  }
+
+  Serial.print("WiFi connected, IP: ");
+  Serial.println(WiFi.localIP());
+
+  try {
+    loop_with_wifi();
+  } catch (WiFiError&) {
+  }
+
+  show_leds(CRGB::Purple);
+  Serial.println("WiFi disconnected");
 }
