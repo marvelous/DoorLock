@@ -32,14 +32,28 @@ void show_leds(auto ... leds) {
 
 using std::literals::string_view_literals::operator""sv;
 
-void serial_print_hex(char c) {
-  Serial.print((c >> 4) & 0xf, HEX);
-  Serial.print((c >> 0) & 0xf, HEX);
-}
-void serial_print_hex(auto const& string) {
-  for (char c : string) {
-    serial_print_hex(c);
+struct Hex {
+  char const* begin;
+  size_t size;
+};
+void serial_print1(auto&& arg) {
+  if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, Hex>) {
+    for (char c : std::string_view{arg.begin, arg.size}) {
+      Serial.print((c >> 4) & 0xf, HEX);
+      Serial.print((c >> 0) & 0xf, HEX);
+    }
+  } else if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, std::string_view>) {
+    Serial.write(arg.data(), arg.size());
+  } else {
+    Serial.print(arg);
   }
+}
+void serial_print(auto&& ... args) {
+  (serial_print1(FWD(args)), ...);
+}
+void serial_println(auto&& ... args) {
+  serial_print(FWD(args)...);
+  Serial.println();
 }
 
 // WiFiClient client;
@@ -47,8 +61,9 @@ BearSSL::WiFiClientSecure client;
 
 struct FatalError: public std::exception {
 };
-void fatal [[noreturn]] () {
+void fatal [[noreturn]] (auto ... args) {
   show_leds(CRGB::White);
+  serial_println(FWD(args)...);
   throw FatalError();
 }
 
@@ -93,8 +108,7 @@ void ldap_send(auto const& message) {
     }
     void write(std::string_view bytes) {
       if (send_buffer.end() < send_end + bytes.size()) {
-        Serial.println("Send buffer overflow");
-        fatal();
+        fatal("Send buffer overflow");
       }
       std::memcpy(send_end, bytes.data(), bytes.size());
       send_end += bytes.size();
@@ -102,16 +116,16 @@ void ldap_send(auto const& message) {
   } writer;
   message.write(writer);
 
-  Serial.println("> Sending LDAP message:");
+  serial_println("> Sending LDAP message:");
   for (SendBuffer::iterator it = send_buffer.begin(); it != send_end;) {
     size_t available = wait_available<&decltype(client)::availableForWrite>();
     available = std::min(available, size_t(send_end - it));
 
     auto written = client.write(reinterpret_cast<uint8_t const*>(it), available);
-    serial_print_hex(std::string_view(it, written));
+    serial_print(Hex{it, written});
     it += written;
   }
-  Serial.println();
+  serial_println();
 }
 
 using ReceiveBuffer = std::array<char, 1024>;
@@ -132,8 +146,7 @@ auto ldap_receive(auto expected_message_id) {
     std::optional<std::string_view> read(size_t length) {
       auto parser_target = parser_begin + length;
       if (parser_target > receive_buffer.end()) {
-        Serial.println("Receive buffer overflow");
-        fatal();
+        fatal("Receive buffer overflow");
       }
 
       while (parser_end < parser_target) {
@@ -141,7 +154,7 @@ auto ldap_receive(auto expected_message_id) {
         available = std::min(available, size_t(receive_buffer.end() - parser_end));
 
         auto read = client.read(reinterpret_cast<uint8_t*>(parser_end), available);
-        serial_print_hex(std::string_view(parser_end, read));
+        serial_print(Hex{parser_end, read});
         parser_end += read;
       }
 
@@ -153,38 +166,28 @@ auto ldap_receive(auto expected_message_id) {
 
   auto message = LDAP::message.read(reader);
   if (!message) {
-    Serial.println("Expected LDAP message");
-    fatal();
+    fatal("Expected LDAP message");
   }
 
   auto [message_id, protocol_op, controls_opt] = *message;
   if (message_id != expected_message_id) {
-    Serial.print("Expected message id ");
-    Serial.print(expected_message_id);
-    Serial.print(" != ");
-    Serial.println(message_id);
-    fatal();
+    fatal("Expected message id ", expected_message_id, " != ", message_id);
   }
 
   if (controls_opt) {
-    Serial.println("Got controls");
+    serial_println("Got controls");
     auto controls = *controls_opt;
     while (!controls.empty()) {
       auto control = LDAP::control.read(controls);
       if (!control) {
-        Serial.println("Expected control");
-        fatal();
+        fatal("Expected control");
       }
       auto [control_type, criticality, control_value] = *control;
-      Serial.print("Control ");
-      Serial.write(control_type.data(), control_type.size());
-      Serial.print(" ");
-      Serial.print(criticality);
+      serial_print("Control ", control_type, " ", criticality);
       if (control_value) {
-        Serial.print(" ");
-        Serial.write(control_value->data(), control_value->size());
+        serial_print(" ", *control_value);
       }
-      Serial.println();
+      serial_println();
     }
   }
 
@@ -210,15 +213,11 @@ void ldap_bind() {
 
   auto protocol_op = ldap_receive(message_id);
   if (protocol_op.tag_number != LDAP::ProtocolOp::BindResponse) {
-    Serial.print("Expected bind response ");
-    Serial.println(int(protocol_op.tag_number));
-    fatal();
+    fatal("Expected bind response ", int(protocol_op.tag_number));
   }
   auto [result_code, matched_dn, diagnostic_message, referral] = protocol_op.get<LDAP::ProtocolOp::BindResponse>();
   if (result_code != LDAP::ResultCode::Success) {
-    Serial.print("Expected bind response success ");
-    Serial.println(int(result_code));
-    fatal();
+    fatal("Expected bind response success ", int(result_code));
   }
 }
 
@@ -227,7 +226,7 @@ void ldap_search(std::string_view badgenuid) {
   auto message_id = 2;
 
   // TODO: add a filter for ptl-active group
-  Serial.println("sending data to server");
+  serial_println("sending data to server");
   ldap_send(
     LDAP::message(
       message_id,
@@ -254,33 +253,23 @@ void ldap_search(std::string_view badgenuid) {
     auto protocol_op = ldap_receive(message_id);
     switch (protocol_op.tag_number) {
     default:
-      Serial.print("Expected search response ");
-      Serial.println(int(protocol_op.tag_number));
-      fatal();
+      fatal("Expected search response ", int(protocol_op.tag_number));
     case LDAP::ProtocolOp::SearchResultEntry: {
       auto [object_name, attributes] = protocol_op.get<LDAP::ProtocolOp::SearchResultEntry>();
-      Serial.print("Object name ");
-      Serial.write(object_name.data(), object_name.size());
-      Serial.println();
+      serial_println("Object name ", object_name);
       while (!attributes.empty()) {
         auto partial_attribute = LDAP::partial_attribute.read(attributes);
         if (!partial_attribute) {
-          Serial.println("Expected partial attribute");
-          fatal();
+          fatal("Expected partial attribute");
         }
         auto [type, vals] = *partial_attribute;
-        Serial.print("Attribute type ");
-        Serial.write(type.data(), type.size());
-        Serial.println();
+        serial_println("Attribute type ", type);
         while (!vals.empty()) {
           auto val = LDAP::attribute_value.read(vals);
           if (!val) {
-            Serial.println("Expected attribute value");
-            return;
+            fatal("Expected attribute value");
           }
-          Serial.print("Attribute value ");
-          Serial.write(val->data(), val->size());
-          Serial.println();
+          serial_println("Attribute value ", *val);
         }
       }
       continue;
@@ -288,9 +277,7 @@ void ldap_search(std::string_view badgenuid) {
     case LDAP::ProtocolOp::SearchResultDone: {
       auto [result_code, matched_dn, diagnostic_message, referral] = protocol_op.get<LDAP::ProtocolOp::BindResponse>();
       if (result_code != LDAP::ResultCode::Success) {
-        Serial.print("Expected search response success ");
-        Serial.println(int(result_code));
-        fatal();
+        fatal("Expected search response success ", int(result_code));
       }
       return;
     }
@@ -312,9 +299,7 @@ void loop_with_client() {
     }
 
     auto badgenuid = std::string_view(reinterpret_cast<char*>(mfrc522.uid.uidByte), mfrc522.uid.size);
-    Serial.print("Badge NUID: ");
-    serial_print_hex(badgenuid);
-    Serial.println();
+    serial_println("Badge NUID: ", badgenuid);
 
     ldap_search(badgenuid);
     if (false) {
@@ -325,7 +310,7 @@ void loop_with_client() {
     }
 
     show_leds(CRGB::Green);
-    Serial.println("Unlocking");
+    serial_println("Unlocking");
     digitalWrite(RELAY_PIN, HIGH);
     delay(2000);
     digitalWrite(RELAY_PIN, LOW);
@@ -336,31 +321,28 @@ void loop_with_client() {
 void loop_with_wifi() {
   while (true) {
 
-    Serial.print("connecting to ");
-    Serial.print(LDAP_HOSTNAME);
-    Serial.print(':');
-    Serial.println(LDAP_PORT);
+    serial_println("connecting to ", LDAP_HOSTNAME, ':', LDAP_PORT);
     if (!client.connect(LDAP_HOSTNAME, LDAP_PORT)) {
-      Serial.println("connection failed");
+      serial_println("connection failed");
       wifi_check();
       continue;
     }
 
-    Serial.println("connected");
+    serial_println("connected");
     try {
       loop_with_client();
     } catch (ClientError&) {
     }
 
     show_leds(CRGB::Purple);
-    Serial.println("disconnected");
+    serial_println("disconnected");
 
   }
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial.println();
+  serial_println();
 
   // Wait a bit, can help when resetting or reflashing sometimes
   delay(1000);
@@ -382,15 +364,13 @@ void setup() {
 }
 
 void loop() {
-  Serial.print("Connecting to ");
-  Serial.println(WIFI_SSID);
+  serial_println("Connecting to ", WIFI_SSID);
 
   while (WiFi.status() != WL_CONNECTED) {
     yield();
   }
 
-  Serial.print("WiFi connected, IP: ");
-  Serial.println(WiFi.localIP());
+  serial_println("WiFi connected, IP: ", WiFi.localIP());
 
   try {
     loop_with_wifi();
@@ -398,5 +378,5 @@ void loop() {
   }
 
   show_leds(CRGB::Purple);
-  Serial.println("WiFi disconnected");
+  serial_println("WiFi disconnected");
 }
