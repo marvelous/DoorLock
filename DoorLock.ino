@@ -100,10 +100,17 @@ size_t wait_available() {
 
 using SendBuffer = std::array<char, 1024>;
 SendBuffer send_buffer;
+SendBuffer::iterator send_begin;
 SendBuffer::iterator send_end;
 
 void ldap_send(auto const& message) {
-  send_end = send_buffer.begin();
+  // compact buffer
+  auto begin = send_buffer.begin();
+  auto size = send_end - send_begin;
+  std::memmove(begin, send_begin, size);
+  send_begin = begin;
+  send_end = begin + size;
+
   struct {
     void write(char c) {
       write({&c, 1});
@@ -118,16 +125,14 @@ void ldap_send(auto const& message) {
   } writer;
   message.write(writer);
 
-  serial_println("> Sending LDAP message:");
-  for (SendBuffer::iterator it = send_buffer.begin(); it != send_end;) {
+  while (send_begin < send_end) {
     size_t available = wait_available<&decltype(client)::availableForWrite>();
-    available = std::min(available, size_t(send_end - it));
+    available = std::min(available, size_t(send_end - send_begin));
 
-    auto written = client.write(reinterpret_cast<uint8_t const*>(it), available);
-    serial_print(Hex{it, written});
-    it += written;
+    auto written = client.write(reinterpret_cast<uint8_t const*>(send_begin), available);
+    serial_println('>', Hex{send_begin, written});
+    send_begin += written;
   }
-  serial_println();
 }
 
 using ReceiveBuffer = std::array<char, 1024>;
@@ -138,8 +143,10 @@ ReceiveBuffer::iterator parser_end;
 auto ldap_receive(auto expected_message_id) {
   // compact buffer
   auto begin = receive_buffer.begin();
-  std::memmove(begin, parser_begin, parser_end - parser_begin);
+  auto size = parser_end - parser_begin;
+  std::memmove(begin, parser_begin, size);
   parser_begin = begin;
+  parser_end = begin + size;
 
   struct {
     std::optional<uint8_t> read() {
@@ -156,7 +163,7 @@ auto ldap_receive(auto expected_message_id) {
         available = std::min(available, size_t(receive_buffer.end() - parser_end));
 
         auto read = client.read(reinterpret_cast<uint8_t*>(parser_end), available);
-        serial_print(Hex{parser_end, read});
+        serial_println('<', Hex{parser_end, read});
         parser_end += read;
       }
 
@@ -329,6 +336,8 @@ void loop_with_wifi() {
     }
 
     serial_println("connected");
+    send_begin = send_buffer.begin();
+    send_end = send_buffer.begin();
     parser_begin = receive_buffer.begin();
     parser_end = receive_buffer.begin();
     try {
