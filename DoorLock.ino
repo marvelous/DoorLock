@@ -45,6 +45,8 @@ void serial_print1(auto&& arg) {
     }
   } else if constexpr (std::is_same_v<Arg, std::string_view>) {
     Serial.write(arg.data(), arg.size());
+  } else if constexpr (std::is_enum_v<Arg>) {
+    Serial.print(std::underlying_type_t<Arg>(arg));
   } else {
     Serial.print(arg);
   }
@@ -237,11 +239,11 @@ void ldap_bind() {
 
   auto protocol_op = ldap_receive(message_id);
   if (protocol_op.tag_number != LDAP::ProtocolOp::BindResponse) {
-    fatal("Expected bind response ", int(protocol_op.tag_number));
+    fatal("Expected bind response ", protocol_op.tag_number);
   }
   auto [result_code, matched_dn, diagnostic_message, referral] = protocol_op.get<LDAP::ProtocolOp::BindResponse>();
   if (result_code != LDAP::ResultCode::Success) {
-    fatal("Expected bind response success ", int(result_code));
+    fatal("Expected bind response success ", result_code);
   }
 }
 
@@ -277,7 +279,7 @@ void ldap_search(std::string_view badgenuid) {
     auto protocol_op = ldap_receive(message_id);
     switch (protocol_op.tag_number) {
     default:
-      fatal("Expected search response ", int(protocol_op.tag_number));
+      fatal("Expected search response ", protocol_op.tag_number);
     case LDAP::ProtocolOp::SearchResultEntry: {
       auto [object_name, attributes] = protocol_op.get<LDAP::ProtocolOp::SearchResultEntry>();
       serial_println("Object name ", object_name);
@@ -301,7 +303,7 @@ void ldap_search(std::string_view badgenuid) {
     case LDAP::ProtocolOp::SearchResultDone: {
       auto [result_code, matched_dn, diagnostic_message, referral] = protocol_op.get<LDAP::ProtocolOp::BindResponse>();
       if (result_code != LDAP::ResultCode::Success) {
-        fatal("Expected search response success ", int(result_code));
+        fatal("Expected search response success ", result_code);
       }
       return;
     }
