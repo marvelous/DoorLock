@@ -100,15 +100,16 @@ size_t wait_available() {
   }
 }
 
-template<auto max_size>
+template<auto size>
 struct Buffer {
 
-  using Array = std::array<char, max_size>;
+  using Array = std::array<char, size>;
   Array array;
   typename Array::iterator begin;
   typename Array::iterator end;
 
-  Buffer(): array(), begin(array.begin()), end(array.begin()) {
+  void reset() {
+    begin = end = array.begin();
   }
 
   void compact() {
@@ -353,8 +354,8 @@ void loop_with_wifi() {
     }
 
     serial_println("connected");
-    send_buffer = decltype(send_buffer)();
-    receive_buffer = decltype(receive_buffer)();
+    send_buffer.reset();
+    receive_buffer.reset();
     try {
       loop_with_client();
     } catch (ClientError&) {
