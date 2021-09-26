@@ -98,77 +98,92 @@ size_t wait_available() {
   }
 }
 
-using SendBuffer = std::array<char, 1024>;
-SendBuffer send_buffer;
-SendBuffer::iterator send_begin;
-SendBuffer::iterator send_end;
+template<auto max_size>
+struct Buffer {
+
+  using Array = std::array<char, max_size>;
+  Array array;
+  typename Array::iterator begin;
+  typename Array::iterator end;
+
+  Buffer(): array(), begin(array.begin()), end(array.begin()) {
+  }
+
+  void compact() {
+    auto zero = array.begin();
+    auto readable = this->readable();
+    std::memmove(zero, begin, readable);
+    begin = zero;
+    end = zero + readable;
+  }
+
+  size_t readable() const {
+    return end - begin;
+  }
+
+  size_t writable() const {
+    return array.end() - end;
+  }
+
+};
+
+Buffer<1024> send_buffer;
 
 void ldap_send(auto const& message) {
-  // compact buffer
-  auto begin = send_buffer.begin();
-  auto size = send_end - send_begin;
-  std::memmove(begin, send_begin, size);
-  send_begin = begin;
-  send_end = begin + size;
+  send_buffer.compact();
 
   struct {
     void write(char c) {
       write({&c, 1});
     }
     void write(std::string_view bytes) {
-      if (send_buffer.end() < send_end + bytes.size()) {
+      if (send_buffer.writable() < bytes.size()) {
         fatal("Send buffer overflow");
       }
-      std::memcpy(send_end, bytes.data(), bytes.size());
-      send_end += bytes.size();
+      std::memcpy(send_buffer.end, bytes.data(), bytes.size());
+      send_buffer.end += bytes.size();
     }
   } writer;
   message.write(writer);
 
-  while (send_begin < send_end) {
-    size_t available = wait_available<&decltype(client)::availableForWrite>();
-    available = std::min(available, size_t(send_end - send_begin));
+  while (true) {
+    auto available = send_buffer.readable();
+    if (!available) {
+      break;
+    }
+    available = std::min(available, wait_available<&WiFiClient::availableForWrite>());
 
-    auto written = client.write(reinterpret_cast<uint8_t const*>(send_begin), available);
-    serial_println('>', Hex{send_begin, written});
-    send_begin += written;
+    auto written = client.write(reinterpret_cast<uint8_t const*>(send_buffer.begin), available);
+    serial_println('>', Hex{send_buffer.begin, written});
+    send_buffer.begin += written;
   }
 }
 
-using ReceiveBuffer = std::array<char, 1024>;
-ReceiveBuffer receive_buffer;
-ReceiveBuffer::iterator parser_begin;
-ReceiveBuffer::iterator parser_end;
+Buffer<1024> receive_buffer;
 
 auto ldap_receive(auto expected_message_id) {
-  // compact buffer
-  auto begin = receive_buffer.begin();
-  auto size = parser_end - parser_begin;
-  std::memmove(begin, parser_begin, size);
-  parser_begin = begin;
-  parser_end = begin + size;
+  receive_buffer.compact();
 
   struct {
     std::optional<uint8_t> read() {
       return OPT_TRY(read(1)).front();
     }
     std::optional<std::string_view> read(size_t length) {
-      auto parser_target = parser_begin + length;
-      if (parser_target > receive_buffer.end()) {
+      if (receive_buffer.readable() + receive_buffer.writable() < length) {
         fatal("Receive buffer overflow");
       }
 
-      while (parser_end < parser_target) {
-        size_t available = wait_available<&decltype(client)::available>();
-        available = std::min(available, size_t(receive_buffer.end() - parser_end));
+      while (receive_buffer.readable() < length) {
+        auto available = receive_buffer.writable();
+        available = std::min(available, wait_available<&WiFiClient::available>());
 
-        auto read = client.read(reinterpret_cast<uint8_t*>(parser_end), available);
-        serial_println('<', Hex{parser_end, read});
-        parser_end += read;
+        auto read = client.read(reinterpret_cast<uint8_t*>(receive_buffer.end), available);
+        serial_println('<', Hex{receive_buffer.end, read});
+        receive_buffer.end += read;
       }
 
-      auto result = std::string_view(parser_begin, length);
-      parser_begin = parser_target;
+      auto result = std::string_view(receive_buffer.begin, length);
+      receive_buffer.begin += length;
       return result;
     }
   } reader;
@@ -336,10 +351,8 @@ void loop_with_wifi() {
     }
 
     serial_println("connected");
-    send_begin = send_buffer.begin();
-    send_end = send_buffer.begin();
-    parser_begin = receive_buffer.begin();
-    parser_end = receive_buffer.begin();
+    send_buffer = decltype(send_buffer)();
+    receive_buffer = decltype(receive_buffer)();
     try {
       loop_with_client();
     } catch (ClientError&) {
