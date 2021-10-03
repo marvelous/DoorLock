@@ -6,6 +6,10 @@
 using namespace std::literals::string_view_literals;
 using namespace BER;
 
+bool operator==(Bytes::StringViewReader const& left, Bytes::StringViewReader const& right) {
+    return left.string == right.string;
+}
+
 template<auto encoding, auto tag_class, auto tag_number>
 auto identifier_write_read(auto&& bytes) {
     auto expected = StaticIdentifier<encoding, tag_class, tag_number>{};

@@ -35,10 +35,6 @@ namespace Bytes {
             return result;
         }
 
-        bool operator==(auto const& that) const {
-            return this->string == that.string;
-        }
-
     };
 
     struct StreamWriter {
