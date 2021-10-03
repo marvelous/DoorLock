@@ -122,14 +122,18 @@ namespace BER {
             dynamic.write(writer);
         }
 
-        static bool read(auto& reader) {
+        static std::optional<StaticIdentifier> read(auto& reader) {
             constexpr auto expected = StaticIdentifier{};
-            auto actual = BOOL_TRY(Dynamic::read(reader));
-            return StaticIdentifier{} == actual;
+            auto actual = OPT_TRY(Dynamic::read(reader));
+            OPT_REQUIRE(expected == actual);
+            return expected;
         }
 
+        bool operator==(StaticIdentifier const& that) const {
+            return true;
+        }
         bool operator==(Dynamic const& that) const {
-            return encoding == that.encoding && tag_class == that.tag_class && tag_number == that.tag_number;;
+            return encoding == that.encoding && tag_class == that.tag_class && tag_number == that.tag_number;
         }
 
     };
@@ -263,7 +267,8 @@ namespace BER {
         }
 
         auto read(auto& reader) const -> decltype(serde.read(std::declval<Bytes::StringViewReader&>())) {
-            OPT_REQUIRE(Identifier::read(reader));
+            auto identifier = OPT_TRY(Identifier::read(reader));
+            OPT_REQUIRE(this->identifier == identifier);
 
             auto length = OPT_TRY(Length::read(reader));
             OPT_REQUIRE(!length.is_indefinite());

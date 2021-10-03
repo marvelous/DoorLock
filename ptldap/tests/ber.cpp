@@ -15,7 +15,8 @@ auto identifier_write_read(auto&& bytes) {
     check_bytes(writer.string, bytes);
 
     auto reader = Bytes::StringViewReader{bytes};
-    CHECK(decltype(expected)::read(reader));
+    auto actual = TRY(decltype(expected)::read(reader));
+    CHECK(expected == actual);
     check_bytes(reader.string, ""sv);
 };
 
