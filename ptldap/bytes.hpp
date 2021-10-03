@@ -5,6 +5,8 @@
 #define FWD(val) std::forward<decltype(val)>(val)
 #define OPT_REQUIRE(condition) if (!(condition)) return std::nullopt
 #define OPT_TRY(optional) ({ auto ref = (optional); OPT_REQUIRE(ref); *ref; })
+#define BOOL_REQUIRE(condition) if (!(condition)) return false;
+#define BOOL_TRY(optional) ({ auto ref = (optional); BOOL_REQUIRE(ref); *ref; })
 #define TRY(optional) ({ auto ref = (optional); REQUIRE(ref); *ref; })
 
 namespace Bytes {

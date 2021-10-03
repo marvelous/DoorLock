@@ -6,23 +6,24 @@
 using namespace std::literals::string_view_literals;
 using namespace BER;
 
-auto identifier_write_read(auto&& bytes, auto&& encoding, auto&& tag_class, auto&& tag_number) {
-    auto identifier = Identifier(encoding, tag_class, tag_number);
+template<auto encoding, auto tag_class, auto tag_number>
+auto identifier_write_read(auto&& bytes) {
+    auto expected = StaticIdentifier<encoding, tag_class, tag_number>{};
 
     auto writer = Bytes::StringWriter();
-    identifier.write(writer);
+    expected.write(writer);
     check_bytes(writer.string, bytes);
 
     auto reader = Bytes::StringViewReader{bytes};
-    CHECK(TRY(decltype(identifier)::read(reader)) == identifier);
+    CHECK(decltype(expected)::read(reader));
     check_bytes(reader.string, ""sv);
 };
 
 TEST_CASE("Identifier") {
 
-    identifier_write_read("\x02"sv, Encoding::Primitive, TagClass::Universal, integer.identifier.tag_number);
-    identifier_write_read("\x30"sv, Encoding::Constructed, TagClass::Universal, 0x10);
-    identifier_write_read("\x7f\xde\xad\x42"sv, Encoding::Constructed, TagClass::Application, 0x1796c2);
+    identifier_write_read<Encoding::Primitive, TagClass::Universal, decltype(integer.identifier)::dynamic.tag_number>("\x02"sv);
+    identifier_write_read<Encoding::Constructed, TagClass::Universal, 0x10>("\x30"sv);
+    identifier_write_read<Encoding::Constructed, TagClass::Application, 0x1796c2>("\x7f\xde\xad\x42"sv);
 
 }
 

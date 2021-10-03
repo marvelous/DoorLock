@@ -53,7 +53,7 @@ namespace BER {
     }
 
     template<typename N>
-    struct Identifier {
+    struct DynamicIdentifier {
 
         using TagNumber = N;
         static constexpr auto extended_type = 0x1F;
@@ -62,7 +62,7 @@ namespace BER {
         TagClass tag_class;
         TagNumber tag_number;
 
-        explicit constexpr Identifier(Encoding encoding, TagClass tag_class, TagNumber tag_number):
+        explicit constexpr DynamicIdentifier(Encoding encoding, TagClass tag_class, TagNumber tag_number):
             encoding(FWD(encoding)),
             tag_class(FWD(tag_class)),
             tag_number(FWD(tag_number)) {}
@@ -87,7 +87,7 @@ namespace BER {
             }
         }
 
-        static std::optional<Identifier> read(auto& reader) {
+        static std::optional<DynamicIdentifier> read(auto& reader) {
             auto byte = OPT_TRY(reader.read());
             auto tag_class = TagClass((byte & 0b11000000) >> 6);
             auto encoding = Encoding((byte & 0b00100000) >> 5);
@@ -102,11 +102,34 @@ namespace BER {
                 tag_number = TagNumber(std::move(tag_number_int));
             }
 
-            return Identifier(encoding, tag_class, std::move(tag_number));
+            return DynamicIdentifier(encoding, tag_class, std::move(tag_number));
         }
 
-        bool operator==(Identifier const& that) const {
-            return this->encoding == that.encoding && this->tag_class == that.tag_class && this->tag_number == that.tag_number;
+    };
+
+    template<Encoding encoding, TagClass tag_class, auto tag_number>
+    struct StaticIdentifier {
+
+        constexpr static DynamicIdentifier dynamic{encoding, tag_class, tag_number};
+        using Dynamic = decltype(dynamic);
+
+        template<TagClass tag_class_new, auto tag_number_new>
+        constexpr auto tagged() const {
+            return StaticIdentifier<encoding, tag_class_new, tag_number_new>{};
+        }
+
+        void write(auto& writer) const {
+            dynamic.write(writer);
+        }
+
+        static bool read(auto& reader) {
+            constexpr auto expected = StaticIdentifier{};
+            auto actual = BOOL_TRY(Dynamic::read(reader));
+            return StaticIdentifier{} == actual;
+        }
+
+        bool operator==(Dynamic const& that) const {
+            return encoding == that.encoding && tag_class == that.tag_class && tag_number == that.tag_number;;
         }
 
     };
@@ -206,22 +229,19 @@ namespace BER {
             identifier(FWD(identifier)),
             serde(FWD(serde)) {}
 
-        constexpr auto tagged(TagClass tag_class, auto tag_number) const {
-            return BER::Type(BER::Identifier(identifier.encoding, tag_class, tag_number), serde);
+        template<TagClass tag_class, auto tag_number>
+        constexpr auto tagged() const {
+            return BER::Type(identifier.template tagged<tag_class, tag_number>(), serde);
         }
 
-        constexpr auto tagged(auto tag_number) const {
-            auto tag_class = identifier.tag_class;
-            if (tag_class == TagClass::Universal) tag_class = TagClass::ContextSpecific;
-            return tagged(tag_class, tag_number);
+        template<auto tag_number>
+        constexpr auto context_specific() const {
+            return tagged<TagClass::ContextSpecific, tag_number>();
         }
 
-        constexpr auto context_specific(auto tag_number) const {
-            return tagged(TagClass::ContextSpecific, tag_number);
-        }
-
-        constexpr auto application(auto tag_number) const {
-            return tagged(TagClass::Application, tag_number);
+        template<auto tag_number>
+        constexpr auto application() const {
+            return tagged<TagClass::Application, tag_number>();
         }
 
         template<typename Value>
@@ -243,21 +263,21 @@ namespace BER {
         }
 
         auto read(auto& reader) const -> decltype(serde.read(std::declval<Bytes::StringViewReader&>())) {
-            auto identifier = OPT_TRY(Identifier::read(reader));
-            OPT_REQUIRE(identifier == this->identifier);
+            OPT_REQUIRE(Identifier::read(reader));
 
             auto length = OPT_TRY(Length::read(reader));
             OPT_REQUIRE(!length.is_indefinite());
 
             auto bytes = Bytes::StringViewReader{OPT_TRY(reader.read(*length.length))};
-            auto value = serde.read(bytes);
+            auto value = OPT_TRY(serde.read(bytes));
             OPT_REQUIRE(bytes.empty());
             return value;
         }
 
     };
-    constexpr auto type(Encoding encoding, auto&& tag_number, auto&& serde) {
-        return Type(Identifier(encoding, TagClass::Universal, FWD(tag_number)), FWD(serde));
+    template<Encoding encoding, auto tag_number>
+    constexpr auto type(auto&& serde) {
+        return Type(StaticIdentifier<encoding, TagClass::Universal, tag_number>{}, FWD(serde));
     }
 
     template<typename Type>
@@ -281,7 +301,7 @@ namespace BER {
 
     };
     constexpr auto explicit_(auto&& type) {
-        return BER::type(Encoding::Constructed, 0x00, Explicit<std::decay_t<decltype(type)>>(FWD(type)));
+        return BER::type<Encoding::Constructed, 0x00>(Explicit<std::decay_t<decltype(type)>>(FWD(type)));
     }
 
     struct Boolean {
@@ -299,7 +319,7 @@ namespace BER {
         }
 
     };
-    constexpr auto boolean = type(Encoding::Primitive, 0x01, Boolean());
+    constexpr auto boolean = type<Encoding::Primitive, 0x01>(Boolean());
 
     template<typename Integral = int> // TODO
     struct Integer {
@@ -336,7 +356,7 @@ namespace BER {
         }
 
     };
-    constexpr auto integer = type(Encoding::Primitive, 2, Integer());
+    constexpr auto integer = type<Encoding::Primitive, 2>(Integer());
 
     struct OctetString {
 
@@ -353,7 +373,7 @@ namespace BER {
         }
 
     };
-    constexpr auto octet_string = type(Encoding::Primitive, 4, OctetString());
+    constexpr auto octet_string = type<Encoding::Primitive, 4>(OctetString());
 
     struct Null {
 
@@ -370,7 +390,7 @@ namespace BER {
         }
 
     };
-    constexpr auto null = type(Encoding::Primitive, 5, Null());
+    constexpr auto null = type<Encoding::Primitive, 5>(Null());
 
     template<typename Enum>
     struct Enumerated {
@@ -393,7 +413,7 @@ namespace BER {
     };
     template<typename Enum>
     constexpr auto enumerated() {
-        return type(Encoding::Primitive, 0x0a, Enumerated<Enum>());
+        return type<Encoding::Primitive, 0x0a>(Enumerated<Enum>());
     }
 
     template<typename ... Types>
@@ -435,7 +455,7 @@ namespace BER {
 
     };
     constexpr auto sequence(auto&&... elements) {
-        return type(Encoding::Constructed, 0x10, Sequence<std::decay_t<decltype(elements)>...>(FWD(elements)...));
+        return type<Encoding::Constructed, 0x10>(Sequence<std::decay_t<decltype(elements)>...>(FWD(elements)...));
     }
 
     template<typename Type>
@@ -467,10 +487,10 @@ namespace BER {
 
     };
     constexpr auto sequence_of(auto&& type) {
-        return BER::type(Encoding::Constructed, 0x10, SequenceOf<std::decay_t<decltype(type)>>(FWD(type)));
+        return BER::type<Encoding::Constructed, 0x10>(SequenceOf<std::decay_t<decltype(type)>>(FWD(type)));
     }
     constexpr auto set_of(auto&& type) {
-        return BER::type(Encoding::Constructed, 0x11, SequenceOf<std::decay_t<decltype(type)>>(FWD(type)));
+        return BER::type<Encoding::Constructed, 0x11>(SequenceOf<std::decay_t<decltype(type)>>(FWD(type)));
     }
 
     template<typename Type>
@@ -518,10 +538,16 @@ namespace BER {
         Types types;
         explicit constexpr Choice(Types types): types(FWD(types)) {}
 
+        constexpr auto with(auto&& type) {
+            constexpr auto tag_number = decltype(type.identifier)::dynamic.tag_number;
+            auto types = std::tuple_cat(this->types, std::tuple(type));
+            return Choice<TagNumber, decltype(types), tag_numbers..., tag_number>(std::move(types));
+        }
+
         template<TagNumber tag_number>
         constexpr auto with(auto&& type) {
-            auto types = std::tuple_cat(this->types, std::tuple(FWD(type).tagged(tag_number)));
-            return Choice<TagNumber, decltype(types), tag_numbers..., tag_number>(std::move(types));
+            static_assert(decltype(type.identifier)::dynamic.tag_class == TagClass::Universal);
+            return with(type.template context_specific<tag_number>());
         }
 
         static constexpr auto tag_number(size_t i) {
@@ -579,7 +605,7 @@ namespace BER {
                 using Value = std::decay_t<decltype(*type.read(reader))>;
                 using Result = decltype(read_choices<i + 1, Values..., Value>(reader, identifier));
                 using Read = typename Result::value_type;
-                if (identifier == type.identifier) {
+                if (type.identifier == identifier) {
                     auto&& result = type.serde.read(reader);
                     if (!result) {
                         return Result(std::nullopt);
@@ -592,8 +618,8 @@ namespace BER {
                 return std::optional<Read<Values...>>(std::nullopt);
             }
         }
-        auto read(auto& reader) const -> decltype(read_choices<0>(reader, *Identifier<TagNumber>::read(std::declval<Bytes::StringViewReader&>()))) {
-            auto&& identifier = OPT_TRY(Identifier<TagNumber>::read(reader));
+        auto read(auto& reader) const -> decltype(read_choices<0>(reader, *DynamicIdentifier<TagNumber>::read(std::declval<Bytes::StringViewReader&>()))) {
+            auto&& identifier = OPT_TRY(DynamicIdentifier<TagNumber>::read(reader));
 
             auto length = OPT_TRY(Length::read(reader));
             OPT_REQUIRE(!length.is_indefinite());
